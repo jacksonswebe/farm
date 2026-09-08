@@ -32,6 +32,7 @@ Everything that does not serve that sentence is out of MVP scope.
 | 07 | [Commercial Model](docs/07-COMMERCIAL-MODEL.md) | Pricing, billing enforcement, payments, unit economics, GTM motion |
 | 08 | [Deployment](docs/08-DEPLOYMENT.md) | Hosting decision, pipeline, backup/restore, runbook |
 | 09 | [Prospect Proposal](docs/09-PROSPECT-PROPOSAL.md) | The revised selling document, with every change from the original justified |
+| 10 | [Run It Locally](docs/10-RUN-IT-LOCALLY.md) | Getting it running on a laptop, written for a non-developer, plus the 15-minute demo script |
 
 Machine-readable artifacts:
 

@@ -1,4 +1,5 @@
 import { refreshAnalytics, cleanupAttachments } from './handlers/analytics';
+import { sendWeeklyDigest } from './handlers/digest';
 import { escalateOverdueActions, remindActionsDue } from './handlers/reminders';
 import type { JobHandler, JobName } from './types';
 
@@ -17,13 +18,7 @@ export const JOB_HANDLERS: Record<JobName, JobHandler> = {
     errors: 0,
     detail: { note: 'Implemented in Sprint 3 alongside the investigation workflow.' },
   }),
-  'digest.weekly': async () => ({
-    job: 'digest.weekly',
-    processed: 0,
-    skipped: 0,
-    errors: 0,
-    detail: { note: 'Implemented in Sprint 3 with the email templates.' },
-  }),
+  'digest.weekly': sendWeeklyDigest,
   'analytics.refresh': refreshAnalytics,
   'attachments.cleanup': cleanupAttachments,
   'trial.check': async () => ({

@@ -1,6 +1,6 @@
 import { AppError, ErrorCode } from '@/server/lib/errors';
-import { unsafeGlobalQuery } from '@/server/db/tenant';
 import type { Ctx } from './context';
+import { resolveMembership } from './memberships';
 import { readSession } from './session';
 
 /**
@@ -12,24 +12,15 @@ export async function getCtx(requestId: string): Promise<Ctx | null> {
   const session = await readSession();
   if (!session) return null;
 
-  const membership = await unsafeGlobalQuery().memberships.findUnique({
-    where: {
-      organization_id_user_id: {
-        organization_id: session.orgId,
-        user_id: session.userId,
-      },
-    },
-    include: { membership_sites: { select: { site_id: true } } },
-  });
-
-  if (!membership || !membership.is_active) return null;
+  const membership = await resolveMembership(session.userId, session.orgId);
+  if (!membership) return null;
 
   return {
     userId: session.userId,
     orgId: session.orgId,
     role: membership.role,
-    allSites: membership.all_sites,
-    siteIds: membership.membership_sites.map((s) => s.site_id),
+    allSites: membership.allSites,
+    siteIds: membership.siteIds,
     requestId,
   };
 }

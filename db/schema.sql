@@ -329,6 +329,47 @@ STABLE AS $$
   SELECT id FROM organizations WHERE deleted_at IS NULL ORDER BY created_at
 $$;
 
+-- Authentication has a chicken-and-egg problem with RLS: resolving which
+-- organization a user belongs to requires reading `memberships`, but that
+-- table is RLS-protected and the tenant context does not exist yet. A plain
+-- read during login returns zero rows and every sign-in fails with
+-- ORG_CONTEXT_REQUIRED.
+--
+-- This returns only the caller-supplied user's own memberships — never
+-- another user's, never any tenant data — so the exposure is one row set
+-- keyed by a user id the session already proved.
+CREATE OR REPLACE FUNCTION app.user_memberships(p_user_id uuid)
+RETURNS TABLE (
+  organization_id uuid,
+  organization_name text,
+  role            org_role,
+  all_sites       boolean,
+  site_ids        uuid[]
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE AS $$
+  SELECT
+    m.organization_id,
+    o.name,
+    m.role,
+    m.all_sites,
+    COALESCE(
+      (SELECT array_agg(ms.site_id) FROM membership_sites ms WHERE ms.membership_id = m.id),
+      '{}'::uuid[]
+    )
+  FROM memberships m
+  JOIN organizations o ON o.id = m.organization_id
+  WHERE m.user_id = p_user_id
+    AND m.is_active
+    AND o.deleted_at IS NULL
+  ORDER BY m.joined_at
+$$;
+
+COMMENT ON FUNCTION app.user_memberships(uuid) IS
+  'Authentication support. Resolves one user''s own memberships before a tenant context exists. SECURITY DEFINER because memberships is RLS-protected and login is what establishes the context.';
+
 COMMENT ON FUNCTION app.active_organization_ids() IS
   'Job-runner support. Returns only organization ids, never tenant data. SECURITY DEFINER so the scheduled jobs can iterate tenants without BYPASSRLS.';
 

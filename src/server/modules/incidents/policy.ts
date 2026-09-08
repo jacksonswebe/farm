@@ -76,12 +76,24 @@ export const incidentPolicy = {
   },
 
   /**
-   * Injury and health detail is stripped for callers without the
-   * permission. Enforced here rather than in the route so it cannot be
-   * forgotten by a new endpoint.
+   * Injury and health detail is decided per person, not per incident.
+   *
+   * Reporting an incident does not entitle you to the injured person's
+   * medical detail. A witness who files the report is exactly the case that
+   * makes an incident-level rule wrong: they would receive a colleague's
+   * diagnosis, body part and lost days simply for doing the right thing.
+   *
+   * So: HSE and the assigned investigator see it because they must
+   * investigate; everyone else sees it only on the record about themselves.
    */
+  canViewPersonSensitive(ctx: Ctx, person: { user_id: string | null }): boolean {
+    if (ctx.role === 'HSE_MANAGER' || ctx.role === 'INVESTIGATOR') return true;
+    return person.user_id !== null && person.user_id === ctx.userId;
+  },
+
+  /** True when the caller may see health data for anyone on the record. */
   canViewSensitive(ctx: Ctx): boolean {
-    return ctx.role === 'HSE_MANAGER' || ctx.role === 'INVESTIGATOR' || ctx.role === 'EMPLOYEE';
+    return ctx.role === 'HSE_MANAGER' || ctx.role === 'INVESTIGATOR';
   },
 };
 

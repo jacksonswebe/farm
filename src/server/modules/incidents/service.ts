@@ -231,25 +231,28 @@ export const incidentService = {
 
       // Health data is stripped here, not in the route, so a new endpoint
       // cannot accidentally expose it. docs/05-RBAC-MATRIX.md section 5.
+      // The decision is per person: filing a report does not entitle the
+      // reporter to a colleague's medical detail.
       const showSensitive = incidentPolicy.canViewSensitive(ctx);
-      const persons = incident.incident_persons.map((p) =>
-        showSensitive || !p.is_sensitive
-          ? p
-          : {
-              ...p,
-              injury_type_term_id: null,
-              body_part_term_id: null,
-              treatment: null,
-              days_lost: null,
-              statement: null,
-            },
-      );
+      let redactedAny = false;
+      const persons = incident.incident_persons.map((p) => {
+        if (!p.is_sensitive || incidentPolicy.canViewPersonSensitive(ctx, p)) return p;
+        redactedAny = true;
+        return {
+          ...p,
+          injury_type_term_id: null,
+          body_part_term_id: null,
+          treatment: null,
+          days_lost: null,
+          statement: null,
+        };
+      });
 
       return {
         ...incident,
         incident_persons: persons,
         attachments: showSensitive ? attachments : attachments.filter((a) => !a.is_sensitive),
-        sensitiveRedacted: !showSensitive,
+        sensitiveRedacted: redactedAny,
       };
     });
   },

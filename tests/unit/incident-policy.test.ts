@@ -93,8 +93,26 @@ describe('sensitive data', () => {
   it('withholds injury detail from an org admin', () => {
     expect(incidentPolicy.canViewSensitive(ctx({ role: 'ORG_ADMIN' }))).toBe(false);
   });
+
   it('allows it for HSE and investigators', () => {
     expect(incidentPolicy.canViewSensitive(ctx({ role: 'HSE_MANAGER' }))).toBe(true);
     expect(incidentPolicy.canViewSensitive(ctx({ role: 'INVESTIGATOR' }))).toBe(true);
+  });
+
+  it("does not give a reporter a colleague's medical detail", () => {
+    // The witness who files the report is the case that makes an
+    // incident-level rule wrong.
+    const reporter = ctx({ role: 'EMPLOYEE', userId: 'witness-1' });
+    expect(incidentPolicy.canViewPersonSensitive(reporter, { user_id: 'injured-2' })).toBe(false);
+    expect(incidentPolicy.canViewPersonSensitive(reporter, { user_id: null })).toBe(false);
+  });
+
+  it('lets a person see their own injury record', () => {
+    const subject = ctx({ role: 'EMPLOYEE', userId: 'injured-2' });
+    expect(incidentPolicy.canViewPersonSensitive(subject, { user_id: 'injured-2' })).toBe(true);
+  });
+
+  it('still lets HSE see every person on the record', () => {
+    expect(incidentPolicy.canViewPersonSensitive(ctx(), { user_id: 'anyone' })).toBe(true);
   });
 });

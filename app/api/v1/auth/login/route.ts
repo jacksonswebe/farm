@@ -1,5 +1,6 @@
 import { type NextRequest } from 'next/server';
 import { z } from 'zod';
+import { resolveMemberships } from '@/server/auth/memberships';
 import { verifyPassword } from '@/server/auth/password';
 import { createSession } from '@/server/auth/session';
 import { unsafeGlobalQuery } from '@/server/db/tenant';
@@ -25,13 +26,6 @@ export async function POST(req: NextRequest) {
 
     const user = await db.users.findFirst({
       where: { email: { equals: email, mode: 'insensitive' }, deleted_at: null },
-      include: {
-        memberships: {
-          where: { is_active: true },
-          select: { organization_id: true },
-          take: 1,
-        },
-      },
     });
 
     // One message for every failure mode. A distinct "no such account"
@@ -60,7 +54,10 @@ export async function POST(req: NextRequest) {
       throw invalid;
     }
 
-    const membership = user.memberships[0];
+    // memberships is RLS-protected and no tenant context exists yet, so this
+    // goes through the SECURITY DEFINER resolver. See src/server/auth/memberships.ts.
+    const memberships = await resolveMemberships(user.id);
+    const membership = memberships[0];
     if (!membership) {
       throw new AppError(
         ErrorCode.ORG_CONTEXT_REQUIRED,
@@ -73,7 +70,7 @@ export async function POST(req: NextRequest) {
       data: { failed_login_count: 0, locked_until: null, last_login_at: new Date() },
     });
 
-    await createSession(user.id, membership.organization_id, {
+    await createSession(user.id, membership.organizationId, {
       ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim(),
       userAgent: req.headers.get('user-agent') ?? undefined,
     });

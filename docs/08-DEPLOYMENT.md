@@ -121,6 +121,67 @@ The migration is deliberately small: point `DATABASE_URL` at the new Postgres, r
 Run `scripts/create-app-role.sql` and verify with `scripts/verify-tenancy.sh` against the
 deployed database before any real data exists.
 
+## 3b. First deploy — the exact sequence
+
+Roughly 30 minutes. Steps 3 and 5 are the ones that are quietly fatal if skipped.
+
+**1. Database.** Create a Neon project in a region near your users (`eu-central-1` is the closest
+to East Africa). Copy both connection strings — the **pooled** one and the **direct** one.
+
+**2. Apply the schema** using the *direct* string:
+```bash
+psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
+psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f db/seed.sql        # demo tenant, optional but do it
+DATABASE_URL="$DIRECT_URL" node scripts/set-demo-passwords.mjs
+```
+
+**3. Create the application role — do not skip this.**
+```bash
+psql "$DIRECT_URL" -v app_password="'<generate one>'" -f scripts/create-app-role.sql
+```
+Connecting the app as the Neon owner role bypasses RLS and every tenant-isolation policy in the
+schema becomes decorative. The script refuses to finish if the role ends up with BYPASSRLS.
+Build `DATABASE_URL` from the **pooled** host with `safesphere_app` as the user.
+
+**4. Vercel.** Import the GitHub repo (framework auto-detects as Next.js). Set environment
+variables from `.env.example` — at minimum:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | pooled Neon URL, user `safesphere_app` |
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `FIELD_ENCRYPTION_KEY` | `openssl rand -hex 32` |
+| `CRON_SECRET` | `openssl rand -base64 32` — without it `/api/cron/*` is a public DoS handle |
+| `NODE_ENV` | `production` (Vercel sets this) |
+
+`S3_*`, `RESEND_API_KEY` and `ANTHROPIC_API_KEY` can wait — attachments, email and AI are not on
+the first-deploy path.
+
+**5. Verify against the deployed database, before real data exists:**
+```bash
+PGHOST_=<neon-host> DB=<db> APP_USER=safesphere_app APP_PASS=<pw> bash scripts/verify-tenancy.sh
+curl -s https://<your-app>.vercel.app/api/health | jq
+```
+Health must report `"tenancy": {"ok": true}` — that asserts `app.current_org()` is NULL with no
+context, i.e. RLS is armed. If it is false, stop and fix step 3.
+
+**6. Confirm cron is live.** Vercel → Project → Cron Jobs should list 7 schedules from
+`vercel.json`. Trigger one by hand:
+```bash
+curl -H "authorization: Bearer $CRON_SECRET" https://<your-app>.vercel.app/api/cron/analytics.refresh
+```
+
+**7. Sign in** as `hse@demo.safesphere.app` / `Demo!2345` and walk the demo: dashboard →
+events → report an event. **Then change or remove the demo passwords** before the URL is shared.
+
+### Post-deploy checklist
+- [ ] `/api/health` returns `status: ok` and `tenancy.ok: true`
+- [ ] `verify-tenancy.sh` passes against the production database
+- [ ] Cron jobs listed in Vercel and one manually triggered successfully
+- [ ] `CRON_SECRET` set (confirm an unauthenticated `/api/cron/*` call returns 401)
+- [ ] Demo credentials rotated or the demo tenant removed before sharing the URL
+- [ ] Neon point-in-time restore confirmed available on your plan
+
 ## 4. The stack
 
 ```

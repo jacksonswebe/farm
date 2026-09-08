@@ -85,5 +85,17 @@ Demo login after seeding: `hse@demo.safesphere.app` / `Demo!2345` (see `db/seed.
 
 ## Status
 
-Specification complete — ready for Sprint 0. Start at
-[docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
+**Sprint 0 complete and verified locally. Ready for first deploy.**
+
+Working today: session auth with argon2id · role-aware navigation · event reporting
+(the <60s form) · event list with keyset pagination, filters and site scoping · classification
+with server-derived risk · live dashboard counters · per-person injury-data redaction ·
+append-only audit trail · scheduled reminders and tiered escalation, idempotent · health endpoint.
+
+Verified: typecheck, lint, 37 tests, a 6-assertion tenant-isolation suite run as an
+unprivileged (NOBYPASSRLS) database role, and a passing production build.
+
+Not built yet: investigations, 5 Whys, CAPA, attachments, email delivery, AI, WhatsApp, billing.
+Those are Sprints 2–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
+
+Next step: [docs/08-DEPLOYMENT.md §3b](docs/08-DEPLOYMENT.md) — the first-deploy sequence.

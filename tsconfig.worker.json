@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "outDir": "dist-worker",
+    "jsx": "react-jsx",
+    "rootDir": "src",
+    "incremental": false,
+    "plugins": []
+  },
+  "include": ["src/server/**/*.ts"],
+  "exclude": ["node_modules", "**/__tests__/**", "**/*.test.ts"]
+}

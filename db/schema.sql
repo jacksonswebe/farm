@@ -312,6 +312,26 @@ BEGIN
   RETURN p_prefix || '-' || v_year::text || '-' || lpad(v_next::text, 4, '0');
 END $$;
 
+-- The scheduled jobs must enumerate tenants before they can scope to one,
+-- which RLS correctly forbids: app.current_org() is NULL outside withTenant(),
+-- so a direct read of `organizations` returns zero rows and every job would
+-- silently do nothing.
+--
+-- SECURITY DEFINER gives the job runner exactly one narrow capability — the
+-- list of active organization ids, and nothing else — instead of granting
+-- BYPASSRLS, which would disable tenant isolation everywhere.
+CREATE OR REPLACE FUNCTION app.active_organization_ids()
+RETURNS SETOF uuid
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE AS $$
+  SELECT id FROM organizations WHERE deleted_at IS NULL ORDER BY created_at
+$$;
+
+COMMENT ON FUNCTION app.active_organization_ids() IS
+  'Job-runner support. Returns only organization ids, never tenant data. SECURITY DEFINER so the scheduled jobs can iterate tenants without BYPASSRLS.';
+
 COMMENT ON FUNCTION app.next_reference IS
   'Gapless per-org/per-prefix/per-year reference. The ON CONFLICT DO UPDATE takes a row lock, so concurrent callers serialise for microseconds.';
 

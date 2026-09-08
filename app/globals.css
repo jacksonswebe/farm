@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Touch targets on a phone held in a gloved hand on a site. 44px minimum. */
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-base
+           shadow-sm outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/30;
+  }
+  .label { @apply mb-1.5 block text-sm font-medium text-slate-700; }
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-5 py-3
+           text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary { @apply btn bg-brand text-white hover:bg-brand-dark; }
+  .btn-ghost { @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50; }
+  .card { @apply rounded-xl border border-slate-200 bg-white shadow-sm; }
+}

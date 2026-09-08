@@ -1,7 +1,26 @@
 # 08 — Hosting Decision & Deployment Runbook
 
-**Decision: single VPS running Docker Compose, deployed by GitHub Actions. Not Vercel.**
-Decided 2026-09-08. Revisit triggers in §3.
+**Decision: Vercel + Neon for the pilot. Revisit at the triggers in §3.**
+Decided 2026-09-08, superseding the VPS recommendation recorded below.
+
+**Why the change.** The recommendation in §2 still stands on its technical merits, and the
+Docker path is committed and working (`docker/`, `.github/workflows/deploy.yml`). It was not
+adopted because the available VPS is shared with other live services: ports 80/443 are taken,
+and standing up this stack there risks an outage in something already running. Vercel gets the
+pilot live today with zero blast radius on that host.
+
+**What it costs, concretely.** The worker objection in §2.1 is real and had to be answered
+rather than ignored. It was answered by making the jobs transport-agnostic:
+`src/server/jobs/handlers/*` are plain functions that know nothing about HTTP, invoked today by
+Vercel Cron through `/api/cron/[job]` and tomorrow by a pg-boss worker with no change to a
+handler. This works here only because every job in the profile is *scheduled* — hourly
+reminders, daily escalations, weekly digests, a 30-minute view refresh. Nothing needs
+sub-minute latency. Were that to change, this decision would have to change with it.
+
+Two things this makes non-negotiable, both now implemented and tested:
+- **Every handler must be idempotent**, because an HTTP cron trigger retries. `notification_log`
+  holds the claim; a re-run sends nothing.
+- **`CRON_SECRET` must be set.** Without it `/api/cron/*` is a public denial-of-service handle.
 
 ---
 
@@ -72,17 +91,35 @@ usage you want to encourage.
 This is a real trade. It is the right one **because the worker forces a VPS into the picture no
 matter which path you pick.**
 
-## 3. Revisit triggers
+## 3. Revisit triggers — move off Vercel when any of these is true
 
-Change this decision when any of these become true — not before:
+- **A customer contractually requires in-country or in-VPC data residency.** This is the most
+  likely trigger and it is a sales event, not an engineering one. The Docker stack below is the
+  answer; it is already built.
+- **A job needs sub-minute latency**, or a job exceeds the serverless execution ceiling
+  (`maxDuration` is set to 300s on the cron route). Real-time work breaks the cron model.
+- **Serverless connection churn against Postgres becomes the bottleneck** despite pooling.
+- **Vercel spend approaches the ~€20/month the VPS stack costs**, with bandwidth on evidence
+  photos the most likely cause.
 
-- More than ~200 tenants, or the box sustains >70% CPU at peak
-- Ops exceeds one day per month
-- You hire a team that would rather buy a platform than run one
-- A customer requires multi-region active-active
+The migration is deliberately small: point `DATABASE_URL` at the new Postgres, run
+`docker compose -f docker/compose.prod.yml up -d`, and let the pg-boss worker call the same
+`JOB_HANDLERS` map that Vercel Cron calls today. No handler changes.
 
-At that point the move is **managed Kubernetes or a platform like Fly/Render**, not Vercel — the
-worker constraint does not change.
+## 3a. Vercel setup
+
+| Concern | Setting |
+|---|---|
+| Region | `fra1` (closest Vercel region to East Africa; `regions` in `vercel.json`) |
+| Database | Neon or Supabase Postgres. Use the **pooled** connection string for `DATABASE_URL` and the **direct** one for migrations — `SET LOCAL` needs transaction-mode pooling, which both provide |
+| App DB role | `safesphere_app`, **NOBYPASSRLS** (`scripts/create-app-role.sql`). Never connect the app as the Neon owner role — it bypasses RLS and every isolation policy becomes inert |
+| Cron | `vercel.json` → 7 schedules, all UTC. 06:00 UTC = 09:00 Africa/Dar_es_Salaam |
+| Secrets | Project → Settings → Environment Variables, from `.env.example` |
+| Build | `pnpm build`. `output: 'standalone'` is applied only when `BUILD_TARGET=docker`, so Vercel builds normally |
+
+**The one setup step that is easy to get wrong and fatal:** connecting as the database owner.
+Run `scripts/create-app-role.sql` and verify with `scripts/verify-tenancy.sh` against the
+deployed database before any real data exists.
 
 ## 4. The stack
 

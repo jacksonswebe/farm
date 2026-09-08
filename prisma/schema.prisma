@@ -1,0 +1,1074 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model action_extensions {
+  id                                                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                     String        @db.Uuid
+  action_id                                           String        @db.Uuid
+  requested_by_user_id                                String?       @db.Uuid
+  previous_due_date                                   DateTime      @db.Date
+  requested_due_date                                  DateTime      @db.Date
+  reason                                              String
+  decided_by_user_id                                  String?       @db.Uuid
+  decided_at                                          DateTime?     @db.Timestamptz(6)
+  approved                                            Boolean?
+  decision_comments                                   String?
+  created_at                                          DateTime      @default(now()) @db.Timestamptz(6)
+  actions                                             actions       @relation(fields: [action_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_action_extensions_decided_by_user_idTousers   users?        @relation("action_extensions_decided_by_user_idTousers", fields: [decided_by_user_id], references: [id], onUpdate: NoAction)
+  organizations                                       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_action_extensions_requested_by_user_idTousers users?        @relation("action_extensions_requested_by_user_idTousers", fields: [requested_by_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([action_id, created_at(sort: Desc)], map: "action_extensions_action_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model action_updates {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String         @db.Uuid
+  action_id        String         @db.Uuid
+  user_id          String?        @db.Uuid
+  note             String
+  progress_percent Int?           @db.SmallInt
+  status_from      action_status?
+  status_to        action_status?
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  actions          actions        @relation(fields: [action_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations    organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users            users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([action_id, created_at(sort: Desc)], map: "action_updates_action_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model actions {
+  id                                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                         String                   @db.Uuid
+  reference                               String
+  title                                   String
+  description                             String?
+  action_type                             action_type
+  status                                  action_status            @default(OPEN)
+  priority                                priority_level           @default(MEDIUM)
+  hierarchy_level                         hierarchy_of_control
+  incident_id                             String?                  @db.Uuid
+  investigation_id                        String?                  @db.Uuid
+  finding_id                              String?                  @db.Uuid
+  root_cause_id                           String?                  @db.Uuid
+  parent_action_id                        String?                  @db.Uuid
+  site_id                                 String?                  @db.Uuid
+  department_id                           String?                  @db.Uuid
+  owner_user_id                           String                   @db.Uuid
+  verifier_user_id                        String?                  @db.Uuid
+  created_by_user_id                      String?                  @db.Uuid
+  original_due_date                       DateTime                 @db.Date
+  due_date                                DateTime                 @db.Date
+  started_at                              DateTime?                @db.Timestamptz(6)
+  submitted_at                            DateTime?                @db.Timestamptz(6)
+  verified_at                             DateTime?                @db.Timestamptz(6)
+  closed_at                               DateTime?                @db.Timestamptz(6)
+  cancelled_reason                        String?
+  effectiveness                           effectiveness_rating?
+  verification_comments                   String?
+  evidence_required                       Boolean                  @default(true)
+  search_vector                           Unsupported("tsvector")?
+  created_at                              DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime                 @default(now()) @db.Timestamptz(6)
+  action_extensions                       action_extensions[]
+  action_updates                          action_updates[]
+  users_actions_created_by_user_idTousers users?                   @relation("actions_created_by_user_idTousers", fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  departments                             departments?             @relation(fields: [department_id], references: [id], onUpdate: NoAction)
+  findings                                findings?                @relation(fields: [finding_id], references: [id], onUpdate: NoAction)
+  incidents                               incidents?               @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  investigations                          investigations?          @relation(fields: [investigation_id], references: [id], onUpdate: NoAction)
+  organizations                           organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_actions_owner_user_idTousers      users                    @relation("actions_owner_user_idTousers", fields: [owner_user_id], references: [id], onUpdate: NoAction)
+  actions                                 actions?                 @relation("actionsToactions", fields: [parent_action_id], references: [id], onUpdate: NoAction)
+  other_actions                           actions[]                @relation("actionsToactions")
+  root_causes                             root_causes?             @relation(fields: [root_cause_id], references: [id], onUpdate: NoAction)
+  sites                                   sites?                   @relation(fields: [site_id], references: [id], onUpdate: NoAction)
+  users_actions_verifier_user_idTousers   users?                   @relation("actions_verifier_user_idTousers", fields: [verifier_user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([organization_id, reference], map: "actions_reference_unique")
+  @@index([incident_id], map: "actions_incident_idx")
+  @@index([organization_id, created_at(sort: Desc), id(sort: Desc)], map: "actions_keyset_idx")
+  @@index([organization_id, status, due_date], map: "actions_org_status_idx")
+  @@index([owner_user_id, status, due_date], map: "actions_owner_idx")
+  @@index([search_vector], map: "actions_search_idx", type: Gin)
+  @@index([organization_id, site_id, due_date], map: "actions_site_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model ai_interactions {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  user_id         String?       @db.Uuid
+  feature         ai_feature
+  entity          entity_type?
+  entity_id       String?       @db.Uuid
+  model           String
+  prompt_version  String
+  prompt_hash     String?
+  input_tokens    Int?
+  output_tokens   Int?
+  cost_usd        Decimal?      @db.Decimal(10, 6)
+  latency_ms      Int?
+  outcome         ai_outcome    @default(SHOWN)
+  error           String?
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([organization_id, feature, outcome], map: "ai_interactions_feature_idx")
+  @@index([organization_id, created_at(sort: Desc)], map: "ai_interactions_org_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model attachments {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String            @db.Uuid
+  entity              entity_type
+  entity_id           String            @db.Uuid
+  storage_key         String            @unique
+  file_name           String
+  mime_type           String
+  size_bytes          BigInt
+  checksum_sha256     String?
+  thumbnail_key       String?
+  caption             String?
+  is_evidence         Boolean           @default(true)
+  is_sensitive        Boolean           @default(false)
+  upload_status       attachment_status @default(PENDING)
+  uploaded_by_user_id String?           @db.Uuid
+  captured_at         DateTime?         @db.Timestamptz(6)
+  latitude            Decimal?          @db.Decimal(9, 6)
+  longitude           Decimal?          @db.Decimal(9, 6)
+  created_at          DateTime          @default(now()) @db.Timestamptz(6)
+  deleted_at          DateTime?         @db.Timestamptz(6)
+  organizations       organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users               users?            @relation(fields: [uploaded_by_user_id], references: [id], onUpdate: NoAction)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model audit_events {
+  id               BigInt        @id @default(autoincrement())
+  organization_id  String        @db.Uuid
+  actor_user_id    String?       @db.Uuid
+  actor_label      String?
+  action           audit_action
+  entity           entity_type
+  entity_id        String?       @db.Uuid
+  entity_reference String?
+  changes          Json?
+  metadata         Json          @default("{}")
+  ip_address       String?       @db.Inet
+  user_agent       String?
+  request_id       String?
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  users            users?        @relation(fields: [actor_user_id], references: [id], onUpdate: NoAction)
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([actor_user_id, created_at(sort: Desc)], map: "audit_events_actor_idx")
+  @@index([entity, entity_id, created_at(sort: Desc)], map: "audit_events_entity_idx")
+  @@index([organization_id, created_at(sort: Desc)], map: "audit_events_org_time_idx")
+}
+
+model auth_sessions {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String         @db.Uuid
+  session_token String         @unique
+  active_org_id String?        @db.Uuid
+  ip_address    String?        @db.Inet
+  user_agent    String?
+  expires_at    DateTime       @db.Timestamptz(6)
+  created_at    DateTime       @default(now()) @db.Timestamptz(6)
+  organizations organizations? @relation(fields: [active_org_id], references: [id], onUpdate: NoAction)
+  users         users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id], map: "auth_sessions_user_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model comments {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  entity          entity_type
+  entity_id       String        @db.Uuid
+  user_id         String?       @db.Uuid
+  body            String
+  is_internal     Boolean       @default(false)
+  mentions        String[]      @default([]) @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  deleted_at      DateTime?     @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model departments {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  site_id         String?       @db.Uuid
+  name            String
+  code            String?
+  manager_user_id String?       @db.Uuid
+  is_active       Boolean       @default(true)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  actions         actions[]
+  users           users?        @relation(fields: [manager_user_id], references: [id], onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sites           sites?        @relation(fields: [site_id], references: [id], onUpdate: NoAction)
+  incidents       incidents[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model exports {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String        @db.Uuid
+  requested_by_user_id String?       @db.Uuid
+  scope                String
+  format               export_format
+  filters              Json          @default("{}")
+  status               export_status @default(QUEUED)
+  row_count            Int?
+  storage_key          String?
+  error                String?
+  expires_at           DateTime      @default(dbgenerated("(now() + '7 days'::interval)")) @db.Timestamptz(6)
+  created_at           DateTime      @default(now()) @db.Timestamptz(6)
+  completed_at         DateTime?     @db.Timestamptz(6)
+  organizations        organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users?        @relation(fields: [requested_by_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([organization_id, created_at(sort: Desc)], map: "exports_org_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model findings {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String         @db.Uuid
+  investigation_id   String         @db.Uuid
+  finding_type       finding_type
+  statement          String
+  evidence_note      String?
+  sort_order         Int            @default(0) @db.SmallInt
+  created_by_user_id String?        @db.Uuid
+  created_at         DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime       @default(now()) @db.Timestamptz(6)
+  actions            actions[]
+  users              users?         @relation(fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  investigations     investigations @relation(fields: [investigation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations      organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([investigation_id, finding_type], map: "findings_investigation_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model incident_persons {
+  id                                                                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                     String             @db.Uuid
+  incident_id                                                         String             @db.Uuid
+  user_id                                                             String?            @db.Uuid
+  full_name                                                           String?
+  contact                                                             String?
+  employer                                                            String?
+  involvement                                                         person_involvement
+  statement                                                           String?
+  injury_type_term_id                                                 String?            @db.Uuid
+  body_part_term_id                                                   String?            @db.Uuid
+  treatment                                                           treatment_level?
+  days_lost                                                           Int?               @db.SmallInt
+  is_sensitive                                                        Boolean            @default(true)
+  created_at                                                          DateTime           @default(now()) @db.Timestamptz(6)
+  taxonomy_terms_incident_persons_body_part_term_idTotaxonomy_terms   taxonomy_terms?    @relation("incident_persons_body_part_term_idTotaxonomy_terms", fields: [body_part_term_id], references: [id], onUpdate: NoAction)
+  incidents                                                           incidents          @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  taxonomy_terms_incident_persons_injury_type_term_idTotaxonomy_terms taxonomy_terms?    @relation("incident_persons_injury_type_term_idTotaxonomy_terms", fields: [injury_type_term_id], references: [id], onUpdate: NoAction)
+  organizations                                                       organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                                                               users?             @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([incident_id], map: "incident_persons_incident_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model incidents {
+  id                                             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                String                   @db.Uuid
+  reference                                      String
+  report_type                                    report_type
+  status                                         report_status            @default(DRAFT)
+  source                                         source_channel           @default(WEB)
+  title                                          String?
+  description                                    String
+  immediate_action                               String?
+  site_id                                        String                   @db.Uuid
+  department_id                                  String?                  @db.Uuid
+  work_area                                      String?
+  latitude                                       Decimal?                 @db.Decimal(9, 6)
+  longitude                                      Decimal?                 @db.Decimal(9, 6)
+  category_term_id                               String?                  @db.Uuid
+  severity                                       severity_level?
+  likelihood                                     likelihood_level?
+  risk_score                                     Int?                     @db.SmallInt
+  risk_band                                      risk_band?
+  occurred_at                                    DateTime                 @db.Timestamptz(6)
+  reported_at                                    DateTime                 @default(now()) @db.Timestamptz(6)
+  acknowledged_at                                DateTime?                @db.Timestamptz(6)
+  investigation_required                         Boolean                  @default(false)
+  closed_at                                      DateTime?                @db.Timestamptz(6)
+  closure_statement                              String?
+  lessons_learned                                String?
+  reported_by_user_id                            String?                  @db.Uuid
+  is_anonymous                                   Boolean                  @default(false)
+  anonymous_contact_encrypted                    Bytes?
+  acknowledged_by_user_id                        String?                  @db.Uuid
+  closed_by_user_id                              String?                  @db.Uuid
+  lost_time                                      Boolean                  @default(false)
+  reportable_to_authority                        Boolean                  @default(false)
+  authority_reference                            String?
+  estimated_cost                                 Decimal?                 @db.Decimal(14, 2)
+  cost_currency                                  String?                  @db.Char(3)
+  duplicate_of_id                                String?                  @db.Uuid
+  rejection_reason                               String?
+  idempotency_key                                String?
+  ai_summary                                     String?
+  search_vector                                  Unsupported("tsvector")?
+  created_at                                     DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                                     DateTime                 @default(now()) @db.Timestamptz(6)
+  actions                                        actions[]
+  incident_persons                               incident_persons[]
+  users_incidents_acknowledged_by_user_idTousers users?                   @relation("incidents_acknowledged_by_user_idTousers", fields: [acknowledged_by_user_id], references: [id], onUpdate: NoAction)
+  taxonomy_terms                                 taxonomy_terms?          @relation(fields: [category_term_id], references: [id], onUpdate: NoAction)
+  users_incidents_closed_by_user_idTousers       users?                   @relation("incidents_closed_by_user_idTousers", fields: [closed_by_user_id], references: [id], onUpdate: NoAction)
+  departments                                    departments?             @relation(fields: [department_id], references: [id], onUpdate: NoAction)
+  incidents                                      incidents?               @relation("incidentsToincidents", fields: [duplicate_of_id], references: [id], onUpdate: NoAction)
+  other_incidents                                incidents[]              @relation("incidentsToincidents")
+  organizations                                  organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_incidents_reported_by_user_idTousers     users?                   @relation("incidents_reported_by_user_idTousers", fields: [reported_by_user_id], references: [id], onUpdate: NoAction)
+  sites                                          sites                    @relation(fields: [site_id], references: [id], onUpdate: NoAction)
+  investigations                                 investigations?
+
+  @@unique([organization_id, reference], map: "incidents_reference_unique")
+  @@index([organization_id, created_at(sort: Desc), id(sort: Desc)], map: "incidents_keyset_idx")
+  @@index([organization_id, severity, occurred_at(sort: Desc)], map: "incidents_org_severity_idx")
+  @@index([organization_id, site_id, occurred_at(sort: Desc)], map: "incidents_org_site_idx")
+  @@index([organization_id, status, occurred_at(sort: Desc)], map: "incidents_org_status_idx")
+  @@index([organization_id, report_type, occurred_at(sort: Desc)], map: "incidents_org_type_idx")
+  @@index([reported_by_user_id, created_at(sort: Desc)], map: "incidents_reporter_idx")
+  @@index([search_vector], map: "incidents_search_idx", type: Gin)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model investigation_interviews {
+  id                                                        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                           String         @db.Uuid
+  investigation_id                                          String         @db.Uuid
+  interviewee_user_id                                       String?        @db.Uuid
+  interviewee_name                                          String?
+  interviewed_at                                            DateTime       @db.Timestamptz(6)
+  notes                                                     String
+  is_sensitive                                              Boolean        @default(false)
+  created_by_user_id                                        String?        @db.Uuid
+  created_at                                                DateTime       @default(now()) @db.Timestamptz(6)
+  users_investigation_interviews_created_by_user_idTousers  users?         @relation("investigation_interviews_created_by_user_idTousers", fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  users_investigation_interviews_interviewee_user_idTousers users?         @relation("investigation_interviews_interviewee_user_idTousers", fields: [interviewee_user_id], references: [id], onUpdate: NoAction)
+  investigations                                            investigations @relation(fields: [investigation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations                                             organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([investigation_id], map: "investigation_interviews_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model investigation_timeline_entries {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String         @db.Uuid
+  investigation_id   String         @db.Uuid
+  occurred_at        DateTime       @db.Timestamptz(6)
+  description        String
+  sort_order         Int            @default(0) @db.SmallInt
+  created_by_user_id String?        @db.Uuid
+  created_at         DateTime       @default(now()) @db.Timestamptz(6)
+  users              users?         @relation(fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  investigations     investigations @relation(fields: [investigation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations      organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([investigation_id, occurred_at], map: "investigation_timeline_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model investigations {
+  id                                               String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                  String                           @db.Uuid
+  incident_id                                      String                           @unique @db.Uuid
+  status                                           investigation_status             @default(ASSIGNED)
+  lead_investigator_id                             String                           @db.Uuid
+  team_user_ids                                    String[]                         @default([]) @db.Uuid
+  assigned_by_user_id                              String?                          @db.Uuid
+  assigned_at                                      DateTime                         @default(now()) @db.Timestamptz(6)
+  due_at                                           DateTime                         @db.Timestamptz(6)
+  started_at                                       DateTime?                        @db.Timestamptz(6)
+  submitted_at                                     DateTime?                        @db.Timestamptz(6)
+  approved_at                                      DateTime?                        @db.Timestamptz(6)
+  approved_by_user_id                              String?                          @db.Uuid
+  returned_at                                      DateTime?                        @db.Timestamptz(6)
+  return_comments                                  String?
+  methodology                                      String                           @default("FIVE_WHYS")
+  summary                                          String?
+  ai_summary                                       String?
+  created_at                                       DateTime                         @default(now()) @db.Timestamptz(6)
+  updated_at                                       DateTime                         @default(now()) @db.Timestamptz(6)
+  actions                                          actions[]
+  findings                                         findings[]
+  investigation_interviews                         investigation_interviews[]
+  investigation_timeline_entries                   investigation_timeline_entries[]
+  users_investigations_approved_by_user_idTousers  users?                           @relation("investigations_approved_by_user_idTousers", fields: [approved_by_user_id], references: [id], onUpdate: NoAction)
+  users_investigations_assigned_by_user_idTousers  users?                           @relation("investigations_assigned_by_user_idTousers", fields: [assigned_by_user_id], references: [id], onUpdate: NoAction)
+  incidents                                        incidents                        @relation(fields: [incident_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_investigations_lead_investigator_idTousers users                            @relation("investigations_lead_investigator_idTousers", fields: [lead_investigator_id], references: [id], onUpdate: NoAction)
+  organizations                                    organizations                    @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  root_causes                                      root_causes[]
+
+  @@index([lead_investigator_id, status], map: "investigations_lead_idx")
+  @@index([organization_id, status, due_at], map: "investigations_org_status_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model invitations {
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String        @db.Uuid
+  email              String
+  role               org_role      @default(EMPLOYEE)
+  all_sites          Boolean       @default(false)
+  site_ids           String[]      @default([]) @db.Uuid
+  token_hash         String        @unique
+  invited_by_user_id String?       @db.Uuid
+  expires_at         DateTime      @db.Timestamptz(6)
+  accepted_at        DateTime?     @db.Timestamptz(6)
+  revoked_at         DateTime?     @db.Timestamptz(6)
+  created_at         DateTime      @default(now()) @db.Timestamptz(6)
+  users              users?        @relation(fields: [invited_by_user_id], references: [id], onUpdate: NoAction)
+  organizations      organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model membership_sites {
+  membership_id   String        @db.Uuid
+  site_id         String        @db.Uuid
+  organization_id String        @db.Uuid
+  memberships     memberships   @relation(fields: [membership_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sites           sites         @relation(fields: [site_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([membership_id, site_id])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model memberships {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String             @db.Uuid
+  user_id            String             @db.Uuid
+  role               org_role           @default(EMPLOYEE)
+  all_sites          Boolean            @default(false)
+  is_active          Boolean            @default(true)
+  notification_prefs Json               @default("{}")
+  joined_at          DateTime           @default(now()) @db.Timestamptz(6)
+  deactivated_at     DateTime?          @db.Timestamptz(6)
+  membership_sites   membership_sites[]
+  organizations      organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users              @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, user_id])
+  @@index([user_id], map: "memberships_user_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notification_deliveries {
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String               @db.Uuid
+  notification_id     String               @db.Uuid
+  channel             notification_channel
+  status              delivery_status      @default(QUEUED)
+  provider            String?
+  provider_message_id String?
+  attempts            Int                  @default(0) @db.SmallInt
+  error               String?
+  sent_at             DateTime?            @db.Timestamptz(6)
+  delivered_at        DateTime?            @db.Timestamptz(6)
+  created_at          DateTime             @default(now()) @db.Timestamptz(6)
+  notifications       notifications        @relation(fields: [notification_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([notification_id], map: "notification_deliveries_notif_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notification_log {
+  organization_id   String        @db.Uuid
+  entity            entity_type
+  entity_id         String        @db.Uuid
+  rule_key          String
+  recipient_user_id String        @db.Uuid
+  scheduled_for     DateTime      @db.Date
+  created_at        DateTime      @default(now()) @db.Timestamptz(6)
+  organizations     organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([entity, entity_id, rule_key, recipient_user_id, scheduled_for])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notification_rules {
+  id                       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String                 @db.Uuid
+  category                 notification_category
+  is_enabled               Boolean                @default(true)
+  channels                 notification_channel[] @default([IN_APP, EMAIL])
+  offsets_hours            Int[]                  @default([])
+  min_severity             severity_level?
+  recipient_roles          org_role[]             @default([])
+  extra_recipient_user_ids String[]               @default([]) @db.Uuid
+  respect_quiet_hours      Boolean                @default(true)
+  created_at               DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime               @default(now()) @db.Timestamptz(6)
+  organizations            organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, category])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notifications {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id         String                    @db.Uuid
+  recipient_user_id       String                    @db.Uuid
+  category                notification_category
+  title                   String
+  body                    String
+  entity                  entity_type?
+  entity_id               String?                   @db.Uuid
+  deep_link               String?
+  severity                severity_level?
+  read_at                 DateTime?                 @db.Timestamptz(6)
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  notification_deliveries notification_deliveries[]
+  organizations           organizations             @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                   users                     @relation(fields: [recipient_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([recipient_user_id, created_at(sort: Desc)], map: "notifications_recipient_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model organizations {
+  id                             String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                           String
+  slug                           String
+  industry                       String?
+  country_code                   String?                          @db.Char(2)
+  default_timezone               String                           @default("Africa/Dar_es_Salaam")
+  locale                         String                           @default("en")
+  logo_url                       String?
+  reference_prefix               String                           @default("INC")
+  settings                       Json                             @default("{}")
+  ai_enabled                     Boolean                          @default(true)
+  ai_monthly_budget_usd          Decimal                          @default(25.00) @db.Decimal(10, 2)
+  retention_years                Int                              @default(7) @db.SmallInt
+  mfa_required                   Boolean                          @default(false)
+  created_at                     DateTime                         @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime                         @default(now()) @db.Timestamptz(6)
+  deleted_at                     DateTime?                        @db.Timestamptz(6)
+  action_extensions              action_extensions[]
+  action_updates                 action_updates[]
+  actions                        actions[]
+  ai_interactions                ai_interactions[]
+  attachments                    attachments[]
+  audit_events                   audit_events[]
+  auth_sessions                  auth_sessions[]
+  comments                       comments[]
+  departments                    departments[]
+  exports                        exports[]
+  findings                       findings[]
+  incident_persons               incident_persons[]
+  incidents                      incidents[]
+  investigation_interviews       investigation_interviews[]
+  investigation_timeline_entries investigation_timeline_entries[]
+  investigations                 investigations[]
+  invitations                    invitations[]
+  membership_sites               membership_sites[]
+  memberships                    memberships[]
+  notification_deliveries        notification_deliveries[]
+  notification_log               notification_log[]
+  notification_rules             notification_rules[]
+  notifications                  notifications[]
+  reference_sequences            reference_sequences[]
+  root_cause_whys                root_cause_whys[]
+  root_causes                    root_causes[]
+  sites                          sites[]
+  subscriptions                  subscriptions?
+  taxonomy_terms                 taxonomy_terms[]
+  whatsapp_sessions              whatsapp_sessions[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model reference_sequences {
+  organization_id String        @db.Uuid
+  prefix          String
+  year            Int           @db.SmallInt
+  last_value      Int           @default(0)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([organization_id, prefix, year])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model root_cause_whys {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  root_cause_id   String        @db.Uuid
+  step            Int           @db.SmallInt
+  question        String
+  answer          String
+  ai_suggested    Boolean       @default(false)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  root_causes     root_causes   @relation(fields: [root_cause_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([root_cause_id, step])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model root_causes {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id    String              @db.Uuid
+  investigation_id   String              @db.Uuid
+  problem_statement  String
+  statement          String
+  category           root_cause_category
+  is_systemic        Boolean             @default(true)
+  created_by_user_id String?             @db.Uuid
+  created_at         DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime            @default(now()) @db.Timestamptz(6)
+  actions            actions[]
+  root_cause_whys    root_cause_whys[]
+  users              users?              @relation(fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  investigations     investigations      @relation(fields: [investigation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id, category, created_at(sort: Desc)], map: "root_causes_category_idx")
+  @@index([investigation_id], map: "root_causes_investigation_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sites {
+  id                          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id             String             @db.Uuid
+  name                        String
+  code                        String
+  timezone                    String             @default("Africa/Dar_es_Salaam")
+  country_code                String?            @db.Char(2)
+  address                     String?
+  latitude                    Decimal?           @db.Decimal(9, 6)
+  longitude                   Decimal?           @db.Decimal(9, 6)
+  anonymous_reporting_enabled Boolean            @default(true)
+  anonymous_token             String?            @unique
+  is_active                   Boolean            @default(true)
+  created_at                  DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime           @default(now()) @db.Timestamptz(6)
+  actions                     actions[]
+  departments                 departments[]
+  incidents                   incidents[]
+  membership_sites            membership_sites[]
+  organizations               organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, code])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscriptions {
+  id                       String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id          String              @unique @db.Uuid
+  tier                     plan_tier           @default(TRIAL)
+  status                   subscription_status @default(TRIALING)
+  seat_limit               Int                 @default(10)
+  site_limit               Int                 @default(1)
+  storage_limit_gb         Int                 @default(5)
+  trial_ends_at            DateTime?           @db.Timestamptz(6)
+  current_period_end       DateTime?           @db.Timestamptz(6)
+  provider                 String?
+  provider_customer_id     String?
+  provider_subscription_id String?
+  created_at               DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime            @default(now()) @db.Timestamptz(6)
+  organizations            organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model taxonomy_terms {
+  id                                                                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id                                                       String             @db.Uuid
+  kind                                                                  taxonomy_kind
+  key                                                                   String
+  label                                                                 String
+  sort_order                                                            Int                @default(100) @db.SmallInt
+  is_system                                                             Boolean            @default(false)
+  is_active                                                             Boolean            @default(true)
+  created_at                                                            DateTime           @default(now()) @db.Timestamptz(6)
+  incident_persons_incident_persons_body_part_term_idTotaxonomy_terms   incident_persons[] @relation("incident_persons_body_part_term_idTotaxonomy_terms")
+  incident_persons_incident_persons_injury_type_term_idTotaxonomy_terms incident_persons[] @relation("incident_persons_injury_type_term_idTotaxonomy_terms")
+  incidents                                                             incidents[]
+  organizations                                                         organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, kind, key])
+}
+
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model users {
+  id                                                                           String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                                                                        String
+  email_verified_at                                                            DateTime?                        @db.Timestamptz(6)
+  password_hash                                                                String?
+  full_name                                                                    String
+  phone_e164                                                                   String?
+  job_title                                                                    String?
+  avatar_url                                                                   String?
+  locale                                                                       String                           @default("en")
+  mfa_secret                                                                   String?
+  mfa_enabled_at                                                               DateTime?                        @db.Timestamptz(6)
+  last_login_at                                                                DateTime?                        @db.Timestamptz(6)
+  failed_login_count                                                           Int                              @default(0) @db.SmallInt
+  locked_until                                                                 DateTime?                        @db.Timestamptz(6)
+  created_at                                                                   DateTime                         @default(now()) @db.Timestamptz(6)
+  updated_at                                                                   DateTime                         @default(now()) @db.Timestamptz(6)
+  deleted_at                                                                   DateTime?                        @db.Timestamptz(6)
+  action_extensions_action_extensions_decided_by_user_idTousers                action_extensions[]              @relation("action_extensions_decided_by_user_idTousers")
+  action_extensions_action_extensions_requested_by_user_idTousers              action_extensions[]              @relation("action_extensions_requested_by_user_idTousers")
+  action_updates                                                               action_updates[]
+  actions_actions_created_by_user_idTousers                                    actions[]                        @relation("actions_created_by_user_idTousers")
+  actions_actions_owner_user_idTousers                                         actions[]                        @relation("actions_owner_user_idTousers")
+  actions_actions_verifier_user_idTousers                                      actions[]                        @relation("actions_verifier_user_idTousers")
+  ai_interactions                                                              ai_interactions[]
+  attachments                                                                  attachments[]
+  audit_events                                                                 audit_events[]
+  auth_sessions                                                                auth_sessions[]
+  comments                                                                     comments[]
+  departments                                                                  departments[]
+  exports                                                                      exports[]
+  findings                                                                     findings[]
+  incident_persons                                                             incident_persons[]
+  incidents_incidents_acknowledged_by_user_idTousers                           incidents[]                      @relation("incidents_acknowledged_by_user_idTousers")
+  incidents_incidents_closed_by_user_idTousers                                 incidents[]                      @relation("incidents_closed_by_user_idTousers")
+  incidents_incidents_reported_by_user_idTousers                               incidents[]                      @relation("incidents_reported_by_user_idTousers")
+  investigation_interviews_investigation_interviews_created_by_user_idTousers  investigation_interviews[]       @relation("investigation_interviews_created_by_user_idTousers")
+  investigation_interviews_investigation_interviews_interviewee_user_idTousers investigation_interviews[]       @relation("investigation_interviews_interviewee_user_idTousers")
+  investigation_timeline_entries                                               investigation_timeline_entries[]
+  investigations_investigations_approved_by_user_idTousers                     investigations[]                 @relation("investigations_approved_by_user_idTousers")
+  investigations_investigations_assigned_by_user_idTousers                     investigations[]                 @relation("investigations_assigned_by_user_idTousers")
+  investigations_investigations_lead_investigator_idTousers                    investigations[]                 @relation("investigations_lead_investigator_idTousers")
+  invitations                                                                  invitations[]
+  memberships                                                                  memberships[]
+  notifications                                                                notifications[]
+  root_causes                                                                  root_causes[]
+  whatsapp_sessions                                                            whatsapp_sessions[]
+}
+
+model verification_tokens {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  identifier  String
+  token_hash  String    @unique
+  purpose     String
+  expires_at  DateTime  @db.Timestamptz(6)
+  consumed_at DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model whatsapp_sessions {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String?        @db.Uuid
+  phone_e164      String         @unique(map: "whatsapp_sessions_phone_idx")
+  user_id         String?        @db.Uuid
+  state           String         @default("START")
+  draft           Json           @default("{}")
+  last_message_at DateTime       @default(now()) @db.Timestamptz(6)
+  expires_at      DateTime       @default(dbgenerated("(now() + '00:30:00'::interval)")) @db.Timestamptz(6)
+  created_at      DateTime       @default(now()) @db.Timestamptz(6)
+  organizations   organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+}
+
+enum action_status {
+  OPEN
+  IN_PROGRESS
+  PENDING_VERIFICATION
+  VERIFIED_CLOSED
+  REJECTED
+  CANCELLED
+}
+
+enum action_type {
+  CORRECTIVE
+  PREVENTIVE
+}
+
+enum ai_feature {
+  SUMMARIZE_REPORT
+  SUGGEST_CLASSIFICATION
+  SUGGEST_WHY
+  SUGGEST_ACTIONS
+  EXEC_NARRATIVE
+  DUPLICATE_DETECTION
+}
+
+enum ai_outcome {
+  SHOWN
+  ACCEPTED
+  EDITED
+  REJECTED
+  FAILED
+}
+
+enum attachment_status {
+  PENDING
+  UPLOADED
+  QUARANTINED
+  FAILED
+}
+
+enum audit_action {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  ASSIGN
+  APPROVE
+  REJECT
+  LOGIN
+  LOGOUT
+  EXPORT
+  VIEW_SENSITIVE
+  PERMISSION_CHANGE
+}
+
+enum delivery_status {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  SUPPRESSED
+}
+
+enum effectiveness_rating {
+  EFFECTIVE
+  PARTIALLY_EFFECTIVE
+  NOT_EFFECTIVE
+}
+
+enum entity_type {
+  ORGANIZATION
+  USER
+  SITE
+  DEPARTMENT
+  INCIDENT
+  INVESTIGATION
+  FINDING
+  ROOT_CAUSE
+  ACTION
+  ATTACHMENT
+  COMMENT
+  EXPORT
+  NOTIFICATION
+  SUBSCRIPTION
+}
+
+enum export_format {
+  CSV
+  XLSX
+  PDF
+}
+
+enum export_status {
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  EXPIRED
+}
+
+enum finding_type {
+  IMMEDIATE_CAUSE
+  UNDERLYING_CAUSE
+  ROOT_CAUSE
+  OBSERVATION
+}
+
+enum hierarchy_of_control {
+  ELIMINATION
+  SUBSTITUTION
+  ENGINEERING
+  ADMINISTRATIVE
+  PPE
+}
+
+enum investigation_status {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  RETURNED
+  APPROVED
+  CANCELLED
+}
+
+enum likelihood_level {
+  RARE
+  UNLIKELY
+  POSSIBLE
+  LIKELY
+  ALMOST_CERTAIN
+}
+
+enum notification_category {
+  REPORT_SUBMITTED
+  REPORT_ACKNOWLEDGED
+  INVESTIGATION_ASSIGNED
+  INVESTIGATION_DUE
+  INVESTIGATION_SUBMITTED
+  INVESTIGATION_RETURNED
+  ACTION_ASSIGNED
+  ACTION_DUE
+  ACTION_OVERDUE
+  ACTION_ESCALATED
+  ACTION_VERIFICATION
+  INCIDENT_CLOSED
+  WEEKLY_DIGEST
+  SYSTEM
+}
+
+enum notification_channel {
+  IN_APP
+  EMAIL
+  WHATSAPP
+  SMS
+}
+
+enum org_role {
+  ORG_ADMIN
+  HSE_MANAGER
+  INVESTIGATOR
+  SITE_MANAGER
+  ACTION_OWNER
+  EMPLOYEE
+  EXECUTIVE
+  AUDITOR
+}
+
+enum person_involvement {
+  INVOLVED
+  INJURED
+  WITNESS
+  FIRST_RESPONDER
+  SUPERVISOR
+}
+
+enum plan_tier {
+  TRIAL
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum priority_level {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum report_status {
+  DRAFT
+  SUBMITTED
+  ACKNOWLEDGED
+  INVESTIGATING
+  ACTIONS_PENDING
+  PENDING_CLOSURE
+  CLOSED
+  REJECTED
+  DUPLICATE
+}
+
+enum report_type {
+  INCIDENT
+  NEAR_MISS
+  HAZARD
+  OBSERVATION
+}
+
+enum risk_band {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum root_cause_category {
+  PEOPLE
+  PROCESS
+  EQUIPMENT
+  ENVIRONMENT
+  MANAGEMENT_SYSTEM
+  EXTERNAL
+}
+
+enum severity_level {
+  NEGLIGIBLE
+  MINOR
+  MODERATE
+  MAJOR
+  CATASTROPHIC
+}
+
+enum source_channel {
+  WEB
+  MOBILE_PWA
+  WHATSAPP
+  ANONYMOUS_LINK
+  IMPORT
+  API
+}
+
+enum subscription_status {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  READ_ONLY
+  CANCELLED
+}
+
+enum taxonomy_kind {
+  INCIDENT_CATEGORY
+  INJURY_TYPE
+  BODY_PART
+  WORK_AREA
+  EQUIPMENT_TYPE
+  ACTION_TAG
+}
+
+enum treatment_level {
+  NONE
+  FIRST_AID
+  MEDICAL_TREATMENT
+  HOSPITALISATION
+  FATALITY
+}

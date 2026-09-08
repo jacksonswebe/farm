@@ -108,7 +108,23 @@ append-only audit trail · idempotent scheduled reminders and tiered escalation 
 Verified: typecheck, lint, 69 tests, a 6-assertion tenant-isolation suite run as an
 unprivileged (NOBYPASSRLS) database role, 32 loop assertions, and a passing production build.
 
-Not built yet: attachments/evidence upload, email delivery, the incident PDF pack, offline PWA,
-AI, WhatsApp, billing. Those are Sprints 3–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
+Also working: evidence upload (presigned, server-verified) · the full 16-element dashboard ·
+email delivery with recorded outcomes · weekly digest · full-text search · anonymous public
+reporting with an encrypted reporter contact · CSV export · rate limiting · a deployment preflight.
+
+**Not built yet:** the incident PDF pack, offline PWA, MFA, AI assistance, WhatsApp, billing.
+Those are the rest of Sprints 4–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md). The PDF pack
+is the highest-value remaining item — it is the audit artifact the product is sold on.
+
+## Verifying a deployment
+
+```bash
+BASE=https://your-app.vercel.app CRON_SECRET=... bash scripts/preflight.sh
+```
+
+Checks the things that fail *silently*: whether row-level security is actually armed (it is not,
+if the app connects as the database owner), whether `/api/cron/*` is a public denial-of-service
+handle, whether the dev-only storage route leaked into production, and whether sign-in is rate
+limited. Run it before any real data exists.
 
 Next step: [docs/08-DEPLOYMENT.md §3b](docs/08-DEPLOYMENT.md) — the first-deploy sequence.

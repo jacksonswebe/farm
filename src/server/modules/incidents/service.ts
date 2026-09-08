@@ -162,6 +162,25 @@ export const incidentService = {
           : {}),
       };
 
+      // Full-text search runs against the stored search_vector (GIN indexed,
+      // weighted reference+title > description > location). Prisma cannot
+      // express @@ websearch_to_tsquery, so matching ids are resolved first
+      // and intersected with the structured filters — which keeps every
+      // permission and scope condition below applying to the result.
+      if (input.q) {
+        const matches = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM incidents
+          WHERE search_vector @@ websearch_to_tsquery('english', ${input.q})
+             OR reference ILIKE ${'%' + input.q + '%'}
+          ORDER BY ts_rank(search_vector, websearch_to_tsquery('english', ${input.q})) DESC
+          LIMIT 500
+        `;
+        if (matches.length === 0) {
+          return { data: [], meta: { nextCursor: null, hasMore: false } };
+        }
+        where.id = { in: matches.map((m) => m.id) };
+      }
+
       const rows = await tx.incidents.findMany({
         where,
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],

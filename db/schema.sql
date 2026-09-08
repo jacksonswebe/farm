@@ -367,6 +367,37 @@ STABLE AS $$
   ORDER BY m.joined_at
 $$;
 
+-- The third and last of the pre-tenant-context lookups.
+--
+-- There is a recurring trap in this design: anything that must identify WHICH
+-- tenant a request belongs to necessarily runs before app.current_org_id is
+-- set, and so is blocked by the very RLS policies that protect it. It has bitten
+-- three times — the job runner enumerating organizations, login resolving a
+-- user's memberships, and now an anonymous report resolving its site token.
+--
+-- The rule: such a lookup NEVER reads a table directly. It goes through a
+-- SECURITY DEFINER function that returns the minimum needed to establish the
+-- context and nothing else. Here that is a site id and an org id, for a token
+-- the caller already holds.
+CREATE OR REPLACE FUNCTION app.resolve_site_token(p_token text)
+RETURNS TABLE (site_id uuid, organization_id uuid, site_name text, org_name text, org_slug text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+STABLE AS $$
+  SELECT s.id, s.organization_id, s.name, o.name, o.slug
+  FROM sites s
+  JOIN organizations o ON o.id = s.organization_id
+  WHERE s.anonymous_token = p_token
+    AND s.is_active
+    AND s.anonymous_reporting_enabled
+    AND o.deleted_at IS NULL
+  LIMIT 1
+$$;
+
+COMMENT ON FUNCTION app.resolve_site_token(text) IS
+  'Public anonymous-reporting support. Resolves a site token to its tenant before any tenant context exists. Returns identifiers only, never report data.';
+
 COMMENT ON FUNCTION app.user_memberships(uuid) IS
   'Authentication support. Resolves one user''s own memberships before a tenant context exists. SECURITY DEFINER because memberships is RLS-protected and login is what establishes the context.';
 

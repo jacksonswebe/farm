@@ -162,6 +162,16 @@ Consequences to accept: every request is one transaction; PgBouncer must run in
 **transaction** pooling mode; the anonymous-report path resolves the org from the site token
 *before* opening the tenant transaction.
 
+**The recurring trap.** Anything that must decide *which* tenant a request belongs to runs
+before `app.current_org_id` is set, and is therefore blocked by the very policies protecting it.
+It has bitten three times during the build — the job runner enumerating organizations, login
+resolving a user's memberships, and the anonymous-report endpoint resolving its site token. Each
+time the symptom was silence, not an error: zero rows, which reads as "no data". The rule is that
+such a lookup never reads a table directly; it goes through a narrow `SECURITY DEFINER` function
+that returns only what is needed to establish context (`app.active_organization_ids`,
+`app.user_memberships`, `app.resolve_site_token`). Granting `BYPASSRLS` would "fix" all three and
+disable tenant isolation everywhere — never do that.
+
 **Verification:** an automated test suite (`tests/tenancy.spec.ts`) creates two orgs and asserts
 that every list endpoint returns zero rows for the wrong org, and that a direct Prisma query
 without `withTenant` returns zero rows. This suite is a merge gate.

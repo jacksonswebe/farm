@@ -47,6 +47,7 @@ export const listActionsSchema = z.object({
   site: z.string().uuid().optional(),
   incidentId: z.string().uuid().optional(),
   dueBefore: z.coerce.date().optional(),
+  q: z.string().trim().max(200).optional(),
 });
 
 export const progressUpdateSchema = z.object({

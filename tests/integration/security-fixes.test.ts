@@ -83,3 +83,30 @@ describe('rate limiting', () => {
     await expect(enforceRateLimit(a)).rejects.toThrow(/Too many/);
   });
 });
+
+describe('full-text search', () => {
+  /**
+   * Regression test.
+   *
+   * `q` was declared in the list schema and never used, so a user typing a
+   * search term got the unfiltered list back and no indication that their
+   * search had been discarded — a wrong answer presented as a right one.
+   */
+  it('narrows results to matches', async () => {
+    const all = await incidentService.list(hse, { limit: 50, cursor: undefined } as never);
+    const hits = await incidentService.list(hse, { limit: 50, q: 'scaffold' } as never);
+    expect(hits.data.length).toBeGreaterThan(0);
+    expect(hits.data.length).toBeLessThan(all.data.length);
+  });
+
+  it('finds a record by its reference number', async () => {
+    const hits = await incidentService.list(hse, { limit: 50, q: 'INC-2026-0001' } as never);
+    expect(hits.data.map((r) => r.reference)).toContain('INC-2026-0001');
+  });
+
+  it('returns nothing rather than everything when there is no match', async () => {
+    const hits = await incidentService.list(hse, { limit: 50, q: 'zzzznomatchzzz' } as never);
+    expect(hits.data).toHaveLength(0);
+    expect(hits.meta.hasMore).toBe(false);
+  });
+});

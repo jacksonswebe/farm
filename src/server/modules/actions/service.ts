@@ -171,6 +171,17 @@ export const actionService = {
           : {}),
       };
 
+      if (input.q) {
+        const matches = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM actions
+          WHERE search_vector @@ websearch_to_tsquery('english', ${input.q})
+             OR reference ILIKE ${'%' + input.q + '%'}
+          LIMIT 500
+        `;
+        if (matches.length === 0) return { data: [], meta: { nextCursor: null, hasMore: false } };
+        where.id = { in: matches.map((m) => m.id) };
+      }
+
       const rows = await tx.actions.findMany({
         where,
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],

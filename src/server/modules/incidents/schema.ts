@@ -69,6 +69,28 @@ export const listIncidentsSchema = z.object({
 });
 export type ListIncidentsInput = z.infer<typeof listIncidentsSchema>;
 
+/**
+ * Anonymous reporting (PRD S2.5).
+ *
+ * Accepts hazards, near misses and observations only — never a full incident,
+ * which needs an identified reporter for the investigation to be possible.
+ * This path exists because requiring a login before someone can report a
+ * hazard suppresses exactly the leading-indicator data the product sells.
+ */
+export const anonymousReportSchema = z.object({
+  siteToken: z.string().trim().min(6).max(64),
+  reportType: z.enum(['NEAR_MISS', 'HAZARD', 'OBSERVATION']),
+  description: z.string().trim().min(20, 'Describe what you saw in at least 20 characters.'),
+  occurredAt: z.coerce
+    .date()
+    .refine((d) => d.getTime() <= Date.now() + 3600_000, 'The event cannot be in the future.')
+    .refine((d) => d.getTime() >= Date.now() - NINETY_DAYS_MS, 'That is more than 90 days ago.'),
+  workArea: z.string().trim().max(200).optional(),
+  severity: severityEnum.optional(),
+  contact: z.string().trim().max(200).optional(),
+});
+export type AnonymousReportInput = z.infer<typeof anonymousReportSchema>;
+
 export const closeIncidentSchema = z.object({
   closureStatement: z.string().trim().min(10),
   lessonsLearned: z.string().trim().max(4000).optional(),

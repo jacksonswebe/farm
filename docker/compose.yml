@@ -18,6 +18,11 @@ services:
       # Applied in filename order on first boot of an empty volume
       - ../db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ../db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+      # Creates the NOBYPASSRLS application role. Without it the app would
+      # connect as the image's superuser, which bypasses row-level security —
+      # so tenant isolation would be off locally and on in production, which
+      # is the worst possible arrangement.
+      - ../db/local-app-role.sql:/docker-entrypoint-initdb.d/03-app-role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U safesphere -d safesphere"]
       interval: 5s

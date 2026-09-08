@@ -114,9 +114,14 @@ Also working: evidence upload (presigned, server-verified) · the full 16-elemen
 email delivery with recorded outcomes · weekly digest · full-text search · anonymous public
 reporting with an encrypted reporter contact · CSV export · rate limiting · a deployment preflight.
 
-**Not built yet:** the incident PDF pack, offline PWA, MFA, AI assistance, WhatsApp, billing.
-Those are the rest of Sprints 4–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md). The PDF pack
-is the highest-value remaining item — it is the audit artifact the product is sold on.
+**The audit evidence pack** is built: a five-page PDF containing the event, the people, the
+investigation, the 5 Whys, every action with its verification, the attached evidence and the
+complete audit trail. It is assembled under the exporting user's own permissions, so a site
+manager's copy withholds injury and sensitive interview detail and says on its face that it has
+— a pack that silently omitted material would be worse than one that refuses.
+
+**Not built yet:** offline PWA, MFA, AI assistance, WhatsApp, billing. Those are the rest of
+Sprints 4–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
 
 ## Verifying a deployment
 

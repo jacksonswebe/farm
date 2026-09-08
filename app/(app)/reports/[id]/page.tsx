@@ -68,6 +68,16 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
         </p>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        <a href={`/api/v1/incidents/${id}/export`} className="btn-primary">
+          Download evidence pack (PDF)
+        </a>
+        <p className="self-center text-xs text-slate-500">
+          Everything on this event in one auditable document. Producing it is recorded in the
+          audit trail.
+        </p>
+      </div>
+
       <Section title="What happened">
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{incident.description}</p>
         {incident.immediate_action && (

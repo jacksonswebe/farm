@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # Fast feedback: fails in ~90s if the code is malformed.
+  static:
+    name: Typecheck & lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - name: Fail on `any` in server code
+        run: |
+          if grep -rn --include=*.ts -E '(:|as)\s+any\b' src/server/; then
+            echo "::error::`any` is not permitted in src/server — the type system is the first authorization layer."
+            exit 1
+          fi
+
+  test:
+    name: Unit & integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: safesphere_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/safesphere_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The canonical DDL is db/schema.sql. If Prisma has drifted from it,
+      # every downstream assumption in the docs is wrong — fail here, loudly.
+      - name: Apply canonical schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
+      - name: Assert Prisma matches the canonical schema
+        run: |
+          pnpm prisma migrate diff \
+            --from-schema-datasource prisma/schema.prisma \
+            --to-schema-datamodel   prisma/schema.prisma \
+            --exit-code || \
+            (echo "::error::prisma/schema.prisma has drifted from db/schema.sql"; exit 1)
+
+      - run: pnpm test:unit
+      - run: pnpm test:integration
+
+  # The suite that stands between us and a cross-tenant data breach.
+  # Non-negotiable merge gate — see docs/03-DATA-MODEL.md section 3.
+  tenancy:
+    name: Tenant isolation
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: safesphere_rls
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema and create a NOBYPASSRLS application role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d safesphere_rls -v ON_ERROR_STOP=1 -q -f db/schema.sql
+          psql -h localhost -U postgres -d safesphere_rls -v ON_ERROR_STOP=1 -q <<'SQL'
+            CREATE ROLE app_ci LOGIN PASSWORD 'ci' NOBYPASSRLS;
+            GRANT USAGE ON SCHEMA public, app TO app_ci;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_ci;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_ci;
+            GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO app_ci;
+            REVOKE UPDATE, DELETE ON audit_events FROM app_ci;
+          SQL
+      - name: Seed two tenants
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -d safesphere_rls -v ON_ERROR_STOP=1 -q -f db/seed.sql > /dev/null
+          psql -h localhost -U postgres -d safesphere_rls -v ON_ERROR_STOP=1 -q <<'SQL'
+            INSERT INTO organizations (id, name, slug)
+              VALUES ('99999999-9999-4999-8999-999999999999','Other Tenant','other');
+            INSERT INTO sites (organization_id, name, code)
+              VALUES ('99999999-9999-4999-8999-999999999999','Pit','PIT');
+            INSERT INTO incidents (organization_id, reference, report_type, status, description, site_id, occurred_at)
+              SELECT '99999999-9999-4999-8999-999999999999','INC-2026-9001','HAZARD','SUBMITTED',
+                     'other tenant record', id, now() FROM sites WHERE code = 'PIT';
+          SQL
+      - name: Assert isolation
+        run: bash scripts/verify-tenancy.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [static]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
+      - run: pnpm build
+
+  e2e:
+    name: E2E (5 critical journeys)
+    runs-on: ubuntu-latest
+    needs: [build]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: safesphere_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/safesphere_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/schema.sql -f db/seed.sql
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # OpenAPI must stay in step with the code it documents.
+  contract:
+    name: API contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npx @redocly/cli@latest lint api/openapi.yaml

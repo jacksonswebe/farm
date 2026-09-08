@@ -30,6 +30,7 @@ Everything that does not serve that sentence is out of MVP scope.
 | 05 | [RBAC Matrix](docs/05-RBAC-MATRIX.md) | Roles × permissions, enforcement layers |
 | 06 | [Build Plan](docs/06-BUILD-PLAN.md) | 10-week sprint backlog, ticket-level tasks, definition of done |
 | 07 | [Commercial Model](docs/07-COMMERCIAL-MODEL.md) | Pricing, billing enforcement, payments, unit economics, GTM motion |
+| 08 | [Deployment](docs/08-DEPLOYMENT.md) | Hosting decision (VPS, not Vercel), pipeline, backup/restore, runbook |
 
 Machine-readable artifacts:
 
@@ -39,6 +40,9 @@ Machine-readable artifacts:
 | `db/seed.sql` | Demo tenant, users, sites, categories and one full incident→CAPA chain |
 | `api/openapi.yaml` | OpenAPI 3.1 contract for the MVP surface |
 | `.env.example` | Every environment variable the system reads |
+| `docker/` | Dockerfile (web/worker/migrator targets), Compose stacks, Caddyfile |
+| `.github/workflows/` | CI (6 merge gates) and zero-downtime deploy with auto-rollback |
+| `scripts/verify-tenancy.sh` | The 5 tenant-isolation assertions — a CI merge gate |
 
 ---
 
@@ -54,7 +58,11 @@ TypeScript end to end. One repo, one language, one deploy target.
 - **Auth**: Auth.js v5, credentials + magic link, TOTP MFA
 - **AI**: Anthropic API behind an internal `ai-service` module with logging + human review
 - **Notify**: Resend (email), Africa's Talking (SMS), WhatsApp Cloud API
-- **Deploy**: Docker Compose on a single VPS behind Caddy; GitHub Actions CI
+- **Deploy**: Docker Compose on a single VPS behind Caddy; GitHub Actions CI/CD
+
+Hosting was decided against Vercel — the escalation worker is a long-running process that
+serverless cannot host, so a VPS is required either way. Full reasoning:
+[docs/08-DEPLOYMENT.md](docs/08-DEPLOYMENT.md).
 
 Rationale and the rejected alternatives (incl. the proposal's Next.js + FastAPI split)
 are in [docs/00-SOURCE-ANALYSIS.md](docs/00-SOURCE-ANALYSIS.md#d1-single-typescript-monolith-not-nextjs--fastapi).

@@ -1,0 +1,46 @@
+# TLS, HTTP/3 and compression are automatic. Caddy obtains and renews
+# certificates itself — there is no certbot cron to forget about.
+
+{
+	email {$ADMIN_EMAIL}
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		Permissions-Policy        "camera=(self), geolocation=(self), microphone=()"
+		-Server
+	}
+
+	# `dynamic a` re-resolves the Docker DNS name on every request, so
+	# `docker compose up --scale web=N` load-balances with no config change.
+	# This is what makes the rolling deploy in deploy.yml zero-downtime.
+	reverse_proxy {
+		dynamic a {
+			name web
+			port 3000
+			refresh 5s
+		}
+		lb_policy least_conn
+		health_uri      /api/health
+		health_interval 10s
+		health_timeout  5s
+		fail_duration   30s
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+		format json
+	}
+}

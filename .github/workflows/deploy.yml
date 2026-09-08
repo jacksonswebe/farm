@@ -1,0 +1,200 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rollback_to:
+        description: 'Image tag to roll back to (leave empty to deploy HEAD)'
+        required: false
+
+concurrency:
+  group: deploy-production      # never two deploys at once
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Deploying a red build is how you find out your CI was decorative.
+  gate:
+    name: Require green CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          running-workflow-name: 'Require green CI'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+          allowed-conclusions: success
+
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: [gate]
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: web
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/web:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: worker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/worker:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/worker:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: migrator
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}/migrator:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: [build]
+    environment:
+      name: production
+      url: https://${{ vars.APP_DOMAIN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve target tag
+        id: target
+        run: |
+          TAG="${{ inputs.rollback_to || needs.build.outputs.tag }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploying tag: $TAG"
+
+      - name: Copy compose files to the host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "docker/compose.prod.yml,docker/Caddyfile"
+          target: /opt/safesphere
+          strip_components: 1
+
+      - name: Migrate, then roll the fleet
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: TAG
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/safesphere
+            source .env                     # host-held secrets, never in the repo
+
+            # Record what is running now so rollback is a known tag, not a guess.
+            docker compose -f compose.prod.yml images --format json > /opt/safesphere/previous-images.json || true
+
+            export IMAGE_TAG="$TAG"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            docker compose -f compose.prod.yml pull
+
+            # Belt and braces: a pre-migration dump, independent of WAL archiving.
+            docker compose -f compose.prod.yml exec -T postgres \
+              pg_dump -U "$POSTGRES_USER" safesphere | gzip > "/opt/safesphere/backups/pre-deploy-$TAG.sql.gz"
+
+            # Migrations run BEFORE the new code serves traffic and must be
+            # backward-compatible with the running version (expand/contract —
+            # see docs/03-DATA-MODEL.md section 8).
+            docker run --rm --network safesphere_default \
+              -e DATABASE_URL="$MIGRATION_DATABASE_URL" \
+              "ghcr.io/${{ github.repository }}/migrator:$TAG"
+
+            # Rolling restart. Caddy's `dynamic a` upstreams re-resolve every
+            # 5s and health-check, so it drains the old container before the
+            # new one takes traffic. stop_grace_period lets requests finish.
+            docker compose -f compose.prod.yml up -d --no-deps --scale web=2 web
+            docker compose -f compose.prod.yml up -d --no-deps worker caddy
+
+            docker image prune -f --filter "until=168h"
+
+      - name: Health check
+        id: health
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -fsS -o /tmp/health.json -w '%{http_code}' \
+                   "https://${{ vars.APP_DOMAIN }}/api/health" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Healthy after ${i} attempt(s):"; cat /tmp/health.json; exit 0
+            fi
+            echo "attempt $i: HTTP $code"; sleep 5
+          done
+          echo "::error::Health check never passed — rolling back."
+          exit 1
+
+      - name: Roll back on failure
+        if: failure() && steps.health.outcome == 'failure'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/safesphere && source .env
+            # Roll code back to the previous tag. Migrations are NOT reverted:
+            # expand/contract guarantees the old code runs against the new
+            # schema. Reverting a migration is a manual, considered decision.
+            PREV=$(cat /opt/safesphere/last-good-tag 2>/dev/null || echo latest)
+            export IMAGE_TAG="$PREV"
+            docker compose -f compose.prod.yml up -d --no-deps web worker
+            echo "Rolled back to $PREV"
+
+      - name: Record last-good tag
+        if: success()
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: TAG
+          script: echo "$TAG" > /opt/safesphere/last-good-tag

@@ -1,0 +1,119 @@
+# Production stack. One VPS runs everything.
+#   docker compose -f docker/compose.prod.yml up -d --scale web=2
+#
+# Secrets come from /opt/safesphere/.env on the host — never from this file
+# and never from the repository.
+
+name: safesphere
+
+x-app-env: &app-env
+  NODE_ENV: production
+  APP_URL: https://${APP_DOMAIN}
+  DATABASE_URL: ${DATABASE_URL}
+  AUTH_SECRET: ${AUTH_SECRET}
+  AUTH_URL: https://${APP_DOMAIN}
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY}
+  S3_ENDPOINT: ${S3_ENDPOINT}
+  S3_BUCKET: ${S3_BUCKET}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+  RESEND_API_KEY: ${RESEND_API_KEY}
+  MAIL_FROM: ${MAIL_FROM}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+  SENTRY_DSN: ${SENTRY_DSN}
+  SENTRY_ENVIRONMENT: production
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"        # HTTP/3
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certificates — losing this re-issues them
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      - web
+
+  web:
+    image: ghcr.io/${GITHUB_REPOSITORY}/web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      JOBS_ENABLED: "false"    # the worker owns the queue; web must not consume
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # No published ports: only Caddy reaches it, over the internal network.
+    stop_grace_period: 30s     # lets in-flight requests finish during a rolling deploy
+
+  worker:
+    image: ghcr.io/${GITHUB_REPOSITORY}/worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      JOBS_ENABLED: "true"
+      JOBS_CONCURRENCY: "5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Exactly one worker. pg-boss handles concurrency internally; a second
+    # replica is safe but unnecessary until job latency becomes visible.
+    stop_grace_period: 60s     # let a running job finish rather than orphan it
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: safesphere
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d safesphere"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Tuned for 8 GB RAM. Adjust with pgtune when the box changes.
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=2GB
+      -c effective_cache_size=6GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=512MB
+      -c wal_level=replica
+      -c archive_mode=on
+      -c archive_command='wal-g wal-push %p'
+      -c log_min_duration_statement=1000
+
+  # Nightly base backup + continuous WAL archiving to R2.
+  # RPO 15 minutes, RTO 4 hours. Tested monthly — see docs/08-DEPLOYMENT.md.
+  backup:
+    image: ghcr.io/${GITHUB_REPOSITORY}/backup:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      WALG_S3_PREFIX: ${BACKUP_S3_PREFIX}
+      AWS_ACCESS_KEY_ID: ${BACKUP_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_SECRET_ACCESS_KEY}
+      AWS_ENDPOINT: ${BACKUP_S3_ENDPOINT}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

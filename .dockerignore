@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.github
+docs
+tests
+coverage
+playwright-report
+test-results
+*.md
+!README.md
+.env*
+!.env.example
+Dockerfile*
+docker/

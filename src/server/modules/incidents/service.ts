@@ -56,10 +56,21 @@ function decodeCursor(cursor: string): { createdAt: Date; id: string } | null {
 }
 
 export const incidentService = {
-  async create(ctx: Ctx, input: CreateIncidentInput) {
+  async create(ctx: Ctx, input: CreateIncidentInput, idempotencyKey?: string) {
     requirePermission(ctx, 'incident.create');
 
     return withTenant(ctx.orgId, async (tx) => {
+      // An offline-queued report retries when signal returns, so the same
+      // submission can arrive more than once. The unique index on
+      // (organization_id, idempotency_key) is the guarantee; this lookup
+      // turns a would-be duplicate into a replay of the original.
+      if (idempotencyKey) {
+        const existing = await tx.incidents.findFirst({
+          where: { idempotency_key: idempotencyKey },
+        });
+        if (existing) return existing;
+      }
+
       const site = await tx.sites.findFirst({
         where: { id: input.siteId, is_active: true },
         select: { id: true },
@@ -87,6 +98,7 @@ export const incidentService = {
           longitude: input.longitude ?? null,
           occurred_at: input.occurredAt,
           reported_by_user_id: ctx.userId,
+          idempotency_key: idempotencyKey ?? null,
         },
       });
 

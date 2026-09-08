@@ -761,6 +761,21 @@ CREATE TABLE notification_log (
   PRIMARY KEY (entity, entity_id, rule_key, recipient_user_id, scheduled_for)
 );
 
+-- Rate limiting, in Postgres rather than Redis: it works identically on a
+-- serverless platform where in-process counters are useless (every request may
+-- hit a fresh instance), and it adds no infrastructure. Applied only to the
+-- routes that need it — auth, anonymous reporting, AI — not to every request.
+CREATE TABLE rate_limits (
+  bucket              text        NOT NULL,   -- e.g. 'login:ip:203.0.113.4'
+  window_start        timestamptz NOT NULL,
+  hits                integer     NOT NULL DEFAULT 1,
+  PRIMARY KEY (bucket, window_start)
+);
+CREATE INDEX rate_limits_sweep_idx ON rate_limits (window_start);
+
+COMMENT ON TABLE rate_limits IS
+  'Fixed-window counters. Not tenant-scoped: the subject is usually an IP or an email that has not yet been resolved to a tenant, so RLS deliberately does not apply.';
+
 -- ---------------------------------------------------------------------
 -- 9. Audit trail (append-only)
 -- ---------------------------------------------------------------------

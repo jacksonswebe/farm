@@ -152,6 +152,8 @@ variables from `.env.example` — at minimum:
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `FIELD_ENCRYPTION_KEY` | `openssl rand -hex 32` |
 | `CRON_SECRET` | `openssl rand -base64 32` — without it `/api/cron/*` is a public DoS handle |
+| `S3_*` | Cloudflare R2 (or any S3-compatible bucket). **Required in production** — `createStorage()` throws rather than silently writing evidence to an ephemeral serverless disk |
+| `RESEND_API_KEY`, `MAIL_FROM` | Optional at first. Without them email falls back to a console driver that logs instead of sending, so notifications still record correctly |
 | `NODE_ENV` | `production` (Vercel sets this) |
 
 `S3_*`, `RESEND_API_KEY` and `ANTHROPIC_API_KEY` can wait — attachments, email and AI are not on

@@ -24,7 +24,8 @@ export async function POST(req: NextRequest) {
   try {
     const ctx = await requireCtx(reqId);
     const input = createIncidentSchema.parse(await req.json());
-    const incident = await incidentService.create(ctx, input);
+    const idempotencyKey = req.headers.get('idempotency-key') ?? undefined;
+    const incident = await incidentService.create(ctx, input, idempotencyKey);
     return created({
       id: incident.id,
       reference: incident.reference,

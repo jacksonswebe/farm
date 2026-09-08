@@ -6,6 +6,7 @@ import { createSession } from '@/server/auth/session';
 import { unsafeGlobalQuery } from '@/server/db/tenant';
 import { AppError, ErrorCode } from '@/server/lib/errors';
 import { ok, requestId, toErrorResponse } from '@/server/lib/api';
+import { clientIp, enforceRateLimit } from '@/server/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -22,6 +23,20 @@ export async function POST(req: NextRequest) {
   const reqId = requestId();
   try {
     const { email, password } = loginSchema.parse(await req.json());
+
+    // Two buckets: per-IP stops a spray across many accounts, per-email stops
+    // a focused attack from rotating addresses. The per-user lockout below
+    // handles neither on its own.
+    const ip = clientIp(req);
+    await enforceRateLimit(
+      { key: `login:ip:${ip}`, limit: 20, windowSeconds: 60 },
+      'Too many sign-in attempts from this device. Wait a minute and try again.',
+    );
+    await enforceRateLimit(
+      { key: `login:email:${email.toLowerCase()}`, limit: 10, windowSeconds: 300 },
+      'Too many sign-in attempts for this account. Wait a few minutes and try again.',
+    );
+
     const db = unsafeGlobalQuery();
 
     const user = await db.users.findFirst({

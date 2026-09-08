@@ -116,6 +116,19 @@ export const investigationService = {
       if (!inv) throw notFound('Investigation');
       investigationPolicy.assertCanView(ctx, inv);
 
+      // An interview marked sensitive — a statement about a colleague, a
+      // medical detail volunteered in the room — is readable by HSE and the
+      // investigation team only. Everyone else sees that it happened, not
+      // what was said. Filtered here rather than in the page so a future
+      // endpoint cannot expose it by omission.
+      const canReadSensitive =
+        ctx.role === 'HSE_MANAGER' || investigationPolicy.isOnTeam(ctx, inv);
+      const interviews = inv.investigation_interviews.map((i) =>
+        i.is_sensitive && !canReadSensitive
+          ? { ...i, notes: '[Withheld — this interview is marked sensitive.]' }
+          : i,
+      );
+
       const actions = await tx.actions.findMany({
         where: { investigation_id: id },
         select: {
@@ -126,7 +139,7 @@ export const investigationService = {
         orderBy: { created_at: 'asc' },
       });
 
-      return { ...inv, actions };
+      return { ...inv, investigation_interviews: interviews, actions };
     });
   },
 

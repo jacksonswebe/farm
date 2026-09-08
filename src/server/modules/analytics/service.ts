@@ -103,7 +103,7 @@ export const analyticsService = {
                  count(*) FILTER (WHERE i.status IN
                    ('SUBMITTED','ACKNOWLEDGED','INVESTIGATING','ACTIONS_PENDING','PENDING_CLOSURE')) AS open
           FROM incidents i JOIN sites s ON s.id = i.site_id
-          WHERE i.${REAL.replace('status', 'status')}${scope.sql.replace('site_id', 'i.site_id')}
+          WHERE i.${REAL}${scope.sql.replace('site_id', 'i.site_id')}
           GROUP BY 1 ORDER BY 2 DESC LIMIT 10`, p),
 
         raw<{ total: bigint; closed: bigint; on_time: bigint; overdue: bigint; due_7: bigint }>(tx, `

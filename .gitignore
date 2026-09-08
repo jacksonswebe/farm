@@ -23,3 +23,6 @@ test-results/
 
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev object storage
+.storage/

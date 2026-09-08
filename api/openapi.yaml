@@ -1,0 +1,816 @@
+openapi: 3.1.0
+info:
+  title: SafeSphere EHS API
+  version: 1.0.0
+  description: |
+    Multi-tenant EHS management API — event reporting, investigation, root cause
+    analysis and CAPA.
+
+    Conventions (pagination, idempotency, error codes, rate limits) are documented in
+    docs/04-API-SPEC.md. Every tenant-scoped request resolves its organization from the
+    session; the database enforces isolation independently via row-level security.
+
+    This file covers the MVP surface. Endpoints marked `x-mvp-phase: should` ship in
+    Sprint 5 if capacity allows.
+servers:
+  - url: https://app.safesphere.io/api/v1
+    description: Production
+  - url: http://localhost:3000/api/v1
+    description: Local
+
+tags:
+  - name: Auth
+  - name: Organization
+  - name: Incidents
+  - name: Investigations
+  - name: Actions
+  - name: Attachments
+  - name: Dashboard
+  - name: AI
+
+security:
+  - sessionCookie: []
+
+paths:
+  /me:
+    get:
+      tags: [Auth]
+      summary: Current user, active organization, permissions and site scope
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CurrentUser' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /incidents:
+    get:
+      tags: [Incidents]
+      summary: List events
+      parameters:
+        - { name: cursor,   in: query, schema: { type: string } }
+        - { name: limit,    in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: type,     in: query, description: Comma-separated ReportType, schema: { type: string } }
+        - { name: status,   in: query, description: Comma-separated ReportStatus, schema: { type: string } }
+        - { name: severity, in: query, description: Comma-separated Severity, schema: { type: string } }
+        - { name: site,     in: query, schema: { type: string, format: uuid } }
+        - { name: from,     in: query, schema: { type: string, format: date } }
+        - { name: to,       in: query, schema: { type: string, format: date } }
+        - { name: q,        in: query, description: Full-text query, schema: { type: string } }
+        - { name: sort,     in: query, schema: { type: string, default: '-occurredAt' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/IncidentListItem' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/PermissionDenied' }
+    post:
+      tags: [Incidents]
+      summary: Create an event report
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: Required for offline-queued submissions. A replay returns the original resource.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Incident' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '403': { $ref: '#/components/responses/PermissionDenied' }
+
+  /incidents/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [Incidents]
+      summary: Get one event
+      description: |
+        Injury and health fields are omitted unless the caller holds `incident.view_sensitive`.
+        A record belonging to another tenant returns 404, never 403.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Incident' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Incidents]
+      summary: Update an event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Incident' }
+        '403': { $ref: '#/components/responses/PermissionDenied' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /incidents/{id}/classify:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Incidents]
+      summary: Classify severity, likelihood and category
+      description: |
+        `riskScore` and `riskBand` are derived server-side from severity × likelihood and cannot
+        be set by the client. Severity MAJOR/CATASTROPHIC or `lostTime` forces
+        `investigationRequired` to true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [severity, likelihood]
+              properties:
+                severity:              { $ref: '#/components/schemas/Severity' }
+                likelihood:            { $ref: '#/components/schemas/Likelihood' }
+                categoryTermId:        { type: string, format: uuid }
+                investigationRequired: { type: boolean }
+                reportableToAuthority: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Incident' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+
+  /incidents/{id}/close:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Incidents]
+      summary: Close an event
+      description: Returns 422 BUSINESS_RULE_VIOLATION when any linked action is not closed or cancelled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [closureStatement]
+              properties:
+                closureStatement: { type: string, minLength: 10 }
+                lessonsLearned:   { type: string }
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Incident' }
+        '422': { $ref: '#/components/responses/BusinessRule' }
+
+  /public/reports:
+    post:
+      tags: [Incidents]
+      summary: Anonymous report via a site's public token
+      security: []
+      description: |
+        No authentication. Rate limited to 10/hour/IP with a captcha after 3. Accepts
+        HAZARD, NEAR_MISS and OBSERVATION only — never a full incident.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [siteToken, reportType, description, occurredAt]
+              properties:
+                siteToken:      { type: string }
+                reportType:     { type: string, enum: [NEAR_MISS, HAZARD, OBSERVATION] }
+                description:    { type: string, minLength: 20 }
+                occurredAt:     { type: string, format: date-time }
+                workArea:       { type: string }
+                severity:       { $ref: '#/components/schemas/Severity' }
+                contact:        { type: string, description: Optional; stored encrypted, HSE-visible only }
+                captchaToken:   { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      reference: { type: string, example: INC-2026-0043 }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /investigations/{id}/submit:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Investigations]
+      summary: Submit an investigation for approval
+      description: Requires at least one finding, one root cause with a category, and one action.
+      responses:
+        '200':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Investigation' }
+        '422': { $ref: '#/components/responses/BusinessRule' }
+
+  /investigations/{id}/approve:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Investigations]
+      summary: Approve an investigation
+      description: On approval the parent incident moves to ACTIONS_PENDING.
+      responses:
+        '200':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Investigation' }
+        '403': { $ref: '#/components/responses/PermissionDenied' }
+
+  /root-causes/{id}/whys:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [Investigations]
+      summary: Replace the 5-Whys chain atomically
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [steps]
+              properties:
+                steps:
+                  type: array
+                  minItems: 3
+                  maxItems: 7
+                  items:
+                    type: object
+                    required: [step, question, answer]
+                    properties:
+                      step:         { type: integer, minimum: 1, maximum: 7 }
+                      question:     { type: string }
+                      answer:       { type: string }
+                      aiSuggested:  { type: boolean, default: false }
+      responses:
+        '200':
+          description: Replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Why' }
+
+  /actions:
+    get:
+      tags: [Actions]
+      summary: List actions
+      parameters:
+        - { name: cursor,    in: query, schema: { type: string } }
+        - { name: limit,     in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: owner,     in: query, description: A user id, or `me`, schema: { type: string } }
+        - { name: status,    in: query, schema: { type: string } }
+        - { name: overdue,   in: query, schema: { type: boolean } }
+        - { name: site,      in: query, schema: { type: string, format: uuid } }
+        - { name: dueBefore, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Action' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+    post:
+      tags: [Actions]
+      summary: Create a corrective or preventive action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Action' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /actions/{id}/verify:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [Actions]
+      summary: Verify a completed action
+      description: |
+        The owner may never verify their own action — enforced by the service policy and by a
+        database check constraint. An effectiveness of NOT_EFFECTIVE automatically creates a
+        linked follow-up action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [effectiveness]
+              properties:
+                effectiveness: { $ref: '#/components/schemas/Effectiveness' }
+                comments:      { type: string }
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Action' }
+        '409':
+          description: Invalid state, or the caller owns this action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                ownerCannotVerify:
+                  value:
+                    error:
+                      code: OWNER_CANNOT_VERIFY
+                      message: An action cannot be verified by its own owner.
+                      requestId: req_01JABCDEF
+
+  /attachments/presign:
+    post:
+      tags: [Attachments]
+      summary: Get a presigned direct-upload URL
+      description: |
+        Files never pass through the application server. The client PUTs to the returned URL,
+        then calls /attachments/{id}/complete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, mimeType, sizeBytes, entity, entityId]
+              properties:
+                fileName:  { type: string }
+                mimeType:  { type: string }
+                sizeBytes: { type: integer, maximum: 15728640 }
+                entity:    { type: string, enum: [INCIDENT, INVESTIGATION, ACTION, FINDING] }
+                entityId:  { type: string, format: uuid }
+      responses:
+        '201':
+          description: Presigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      attachmentId: { type: string, format: uuid }
+                      uploadUrl:    { type: string, format: uri }
+                      expiresAt:    { type: string, format: date-time }
+        '402': { $ref: '#/components/responses/PlanLimit' }
+        '413':
+          description: File too large
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: All current-state dashboard tiles in one call
+      description: Live SQL against the base tables — operational counters are never served stale.
+      parameters:
+        - { name: site, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to,   in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/DashboardSummary' }
+
+  /ai/classify:
+    post:
+      tags: [AI]
+      summary: Suggest a classification for a report
+      x-mvp-phase: should
+      description: |
+        Advisory only. The response pre-fills form fields that a human confirms. On provider
+        failure the endpoint returns 200 with `data: null` so the workflow degrades to manual
+        entry rather than breaking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [incidentId]
+              properties:
+                incidentId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Suggestion, or null when AI is unavailable or disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    oneOf:
+                      - type: 'null'
+                      - type: object
+                        properties:
+                          interactionId:  { type: string, format: uuid }
+                          categoryTermId: { type: string, format: uuid }
+                          severity:       { $ref: '#/components/schemas/Severity' }
+                          likelihood:     { $ref: '#/components/schemas/Likelihood' }
+                          confidence:     { type: number, minimum: 0, maximum: 1 }
+                          rationale:      { type: string }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: safesphere.sid
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Scoped API key for integrations (Release 2)
+
+  schemas:
+    ReportType:   { type: string, enum: [INCIDENT, NEAR_MISS, HAZARD, OBSERVATION] }
+    ReportStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, ACKNOWLEDGED, INVESTIGATING, ACTIONS_PENDING, PENDING_CLOSURE, CLOSED, REJECTED, DUPLICATE]
+    Severity:     { type: string, enum: [NEGLIGIBLE, MINOR, MODERATE, MAJOR, CATASTROPHIC] }
+    Likelihood:   { type: string, enum: [RARE, UNLIKELY, POSSIBLE, LIKELY, ALMOST_CERTAIN] }
+    RiskBand:     { type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL] }
+    ActionType:   { type: string, enum: [CORRECTIVE, PREVENTIVE] }
+    ActionStatus: { type: string, enum: [OPEN, IN_PROGRESS, PENDING_VERIFICATION, VERIFIED_CLOSED, REJECTED, CANCELLED] }
+    Hierarchy:    { type: string, enum: [ELIMINATION, SUBSTITUTION, ENGINEERING, ADMINISTRATIVE, PPE] }
+    Effectiveness: { type: string, enum: [EFFECTIVE, PARTIALLY_EFFECTIVE, NOT_EFFECTIVE] }
+    RootCauseCategory:
+      type: string
+      enum: [PEOPLE, PROCESS, EQUIPMENT, ENVIRONMENT, MANAGEMENT_SYSTEM, EXTERNAL]
+
+    PageMeta:
+      type: object
+      properties:
+        nextCursor: { type: [string, 'null'] }
+        hasMore:    { type: boolean }
+        total:      { type: integer, description: Omitted above 10,000 matches }
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:      { type: string }
+            message:   { type: string }
+            requestId: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  path:    { type: string }
+                  message: { type: string }
+
+    UserRef:
+      type: object
+      properties:
+        id:       { type: string, format: uuid }
+        fullName: { type: string }
+        email:    { type: string, format: email }
+
+    CurrentUser:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        email:        { type: string, format: email }
+        fullName:     { type: string }
+        locale:       { type: string }
+        mfaEnabled:   { type: boolean }
+        organization:
+          type: object
+          properties:
+            id:   { type: string, format: uuid }
+            name: { type: string }
+            slug: { type: string }
+        role:        { type: string }
+        allSites:    { type: boolean }
+        siteIds:
+          type: array
+          items: { type: string, format: uuid }
+        permissions:
+          type: array
+          items: { type: string }
+          example: [incident.create, incident.view, action.verify]
+
+    IncidentListItem:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        reference:   { type: string, example: INC-2026-0001 }
+        reportType:  { $ref: '#/components/schemas/ReportType' }
+        status:      { $ref: '#/components/schemas/ReportStatus' }
+        title:       { type: [string, 'null'] }
+        severity:    { $ref: '#/components/schemas/Severity' }
+        riskBand:    { $ref: '#/components/schemas/RiskBand' }
+        siteName:    { type: string }
+        occurredAt:  { type: string, format: date-time }
+        reportedAt:  { type: string, format: date-time }
+        openActionCount: { type: integer }
+
+    Incident:
+      allOf:
+        - $ref: '#/components/schemas/IncidentListItem'
+        - type: object
+          properties:
+            description:      { type: string }
+            immediateAction:  { type: [string, 'null'] }
+            siteId:           { type: string, format: uuid }
+            departmentId:     { type: [string, 'null'], format: uuid }
+            workArea:         { type: [string, 'null'] }
+            likelihood:       { $ref: '#/components/schemas/Likelihood' }
+            riskScore:        { type: [integer, 'null'] }
+            lostTime:         { type: boolean }
+            reportableToAuthority: { type: boolean }
+            isAnonymous:      { type: boolean }
+            reportedBy:       { $ref: '#/components/schemas/UserRef' }
+            acknowledgedAt:   { type: [string, 'null'], format: date-time }
+            closedAt:         { type: [string, 'null'], format: date-time }
+            persons:
+              type: array
+              description: Injury detail is omitted without the `incident.view_sensitive` permission.
+              items: { $ref: '#/components/schemas/IncidentPerson' }
+            attachments:
+              type: array
+              items: { $ref: '#/components/schemas/Attachment' }
+
+    IncidentCreate:
+      type: object
+      required: [reportType, description, siteId, occurredAt]
+      properties:
+        reportType:      { $ref: '#/components/schemas/ReportType' }
+        description:     { type: string, minLength: 20 }
+        siteId:          { type: string, format: uuid }
+        occurredAt:      { type: string, format: date-time, description: Not in the future, not more than 90 days past }
+        title:           { type: string }
+        departmentId:    { type: string, format: uuid }
+        workArea:        { type: string }
+        severity:        { $ref: '#/components/schemas/Severity' }
+        immediateAction: { type: string }
+        latitude:        { type: number }
+        longitude:       { type: number }
+        asDraft:         { type: boolean, default: false }
+        attachmentIds:
+          type: array
+          items: { type: string, format: uuid }
+
+    IncidentUpdate:
+      type: object
+      properties:
+        title:           { type: string }
+        description:     { type: string, minLength: 20 }
+        workArea:        { type: string }
+        departmentId:    { type: string, format: uuid }
+        immediateAction: { type: string }
+        lostTime:        { type: boolean }
+        estimatedCost:   { type: number }
+
+    IncidentPerson:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        fullName:    { type: [string, 'null'] }
+        user:        { $ref: '#/components/schemas/UserRef' }
+        involvement: { type: string, enum: [INVOLVED, INJURED, WITNESS, FIRST_RESPONDER, SUPERVISOR] }
+        treatment:   { type: [string, 'null'], enum: [NONE, FIRST_AID, MEDICAL_TREATMENT, HOSPITALISATION, FATALITY, null] }
+        daysLost:    { type: [integer, 'null'] }
+
+    Investigation:
+      type: object
+      properties:
+        id:       { type: string, format: uuid }
+        incidentId: { type: string, format: uuid }
+        status:   { type: string, enum: [ASSIGNED, IN_PROGRESS, SUBMITTED, RETURNED, APPROVED, CANCELLED] }
+        leadInvestigator: { $ref: '#/components/schemas/UserRef' }
+        dueAt:        { type: string, format: date-time }
+        submittedAt:  { type: [string, 'null'], format: date-time }
+        approvedAt:   { type: [string, 'null'], format: date-time }
+        summary:      { type: [string, 'null'] }
+        rootCauses:
+          type: array
+          items: { $ref: '#/components/schemas/RootCause' }
+
+    RootCause:
+      type: object
+      properties:
+        id:               { type: string, format: uuid }
+        problemStatement: { type: string }
+        statement:        { type: string }
+        category:         { $ref: '#/components/schemas/RootCauseCategory' }
+        whys:
+          type: array
+          items: { $ref: '#/components/schemas/Why' }
+
+    Why:
+      type: object
+      properties:
+        step:        { type: integer, minimum: 1, maximum: 7 }
+        question:    { type: string }
+        answer:      { type: string }
+        aiSuggested: { type: boolean }
+
+    Action:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        reference:       { type: string, example: ACT-2026-0001 }
+        title:           { type: string }
+        description:     { type: [string, 'null'] }
+        actionType:      { $ref: '#/components/schemas/ActionType' }
+        status:          { $ref: '#/components/schemas/ActionStatus' }
+        hierarchyLevel:  { $ref: '#/components/schemas/Hierarchy' }
+        priority:        { type: string, enum: [LOW, MEDIUM, HIGH, URGENT] }
+        owner:           { $ref: '#/components/schemas/UserRef' }
+        verifier:        { $ref: '#/components/schemas/UserRef' }
+        incidentId:      { type: [string, 'null'], format: uuid }
+        originalDueDate: { type: string, format: date }
+        dueDate:         { type: string, format: date }
+        isOverdue:       { type: boolean, description: Derived, never stored }
+        effectiveness:   { $ref: '#/components/schemas/Effectiveness' }
+        verifiedAt:      { type: [string, 'null'], format: date-time }
+
+    ActionCreate:
+      type: object
+      required: [title, actionType, hierarchyLevel, ownerUserId, dueDate]
+      properties:
+        title:          { type: string, minLength: 5 }
+        description:    { type: string }
+        actionType:     { $ref: '#/components/schemas/ActionType' }
+        hierarchyLevel: { $ref: '#/components/schemas/Hierarchy' }
+        priority:       { type: string, enum: [LOW, MEDIUM, HIGH, URGENT], default: MEDIUM }
+        ownerUserId:    { type: string, format: uuid }
+        verifierUserId: { type: string, format: uuid }
+        dueDate:        { type: string, format: date, description: Must be in the future }
+        incidentId:     { type: string, format: uuid }
+        findingId:      { type: string, format: uuid }
+        rootCauseId:    { type: string, format: uuid }
+        siteId:         { type: string, format: uuid }
+
+    Attachment:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        fileName:  { type: string }
+        mimeType:  { type: string }
+        sizeBytes: { type: integer }
+        caption:   { type: [string, 'null'] }
+        url:       { type: [string, 'null'], format: uri, description: Presigned GET, 15-minute expiry }
+
+    DashboardSummary:
+      type: object
+      properties:
+        eventsThisPeriod:
+          type: object
+          properties:
+            total:        { type: integer }
+            previous:     { type: integer }
+            byType:       { type: object, additionalProperties: { type: integer } }
+        openByStatus:     { type: object, additionalProperties: { type: integer } }
+        overdueActions:   { type: integer }
+        actionsDueNext7Days: { type: integer }
+        overdueInvestigations: { type: integer }
+        leadingLaggingRatio:   { type: [number, 'null'] }
+        medianHoursToReport:   { type: [number, 'null'] }
+        medianDaysToClose:     { type: [number, 'null'] }
+        actionClosureRate:     { type: [number, 'null'], description: Percent closed on or before the due date }
+        hierarchyMix:          { type: object, additionalProperties: { type: integer } }
+        topRootCauseCategories:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { $ref: '#/components/schemas/RootCauseCategory' }
+              count:    { type: integer }
+
+  responses:
+    ValidationError:
+      description: 400 VALIDATION_ERROR
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: 401 UNAUTHENTICATED
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PermissionDenied:
+      description: 403 PERMISSION_DENIED or OUT_OF_SCOPE
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 404 NOT_FOUND — also returned for records in another tenant
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidState:
+      description: 409 INVALID_STATE — the transition is not allowed from the current status
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BusinessRule:
+      description: 422 BUSINESS_RULE_VIOLATION
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PlanLimit:
+      description: 402 PLAN_LIMIT_EXCEEDED
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: 429 RATE_LIMITED
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

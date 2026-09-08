@@ -85,17 +85,30 @@ Demo login after seeding: `hse@demo.safesphere.app` / `Demo!2345` (see `db/seed.
 
 ## Status
 
-**Sprint 0 complete and verified locally. Ready for first deploy.**
+**Sprints 0 and 2 complete. The full safety loop works. Ready for first deploy.**
 
-Working today: session auth with argon2id · role-aware navigation · event reporting
-(the <60s form) · event list with keyset pagination, filters and site scoping · classification
-with server-derived risk · live dashboard counters · per-person injury-data redaction ·
-append-only audit trail · scheduled reminders and tiered escalation, idempotent · health endpoint.
+The demo the source proposal calls for now runs end to end:
 
-Verified: typecheck, lint, 37 tests, a 6-assertion tenant-isolation suite run as an
-unprivileged (NOBYPASSRLS) database role, and a passing production build.
+```
+report -> classify -> assign -> investigate -> 5 Whys -> CAPA -> verify -> close
+```
 
-Not built yet: investigations, 5 Whys, CAPA, attachments, email delivery, AI, WhatsApp, billing.
-Those are Sprints 2–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
+`scripts/demo-loop.py` walks that loop against a running server and asserts 32 business rules,
+including the ones that matter most: risk is computed by the database not the client, an
+investigation is forced for major events regardless of what the client sends, an empty
+investigation cannot be submitted, a lead cannot approve their own investigation, an owner
+cannot verify their own action, a not-effective verification raises a follow-up automatically,
+an extension never overwrites the original due date, and an event cannot close while an action
+is open.
+
+Also working: session auth with argon2id · role-aware navigation · the <60s report form ·
+keyset pagination with filters and site scoping · per-person injury-data redaction ·
+append-only audit trail · idempotent scheduled reminders and tiered escalation · health endpoint.
+
+Verified: typecheck, lint, 69 tests, a 6-assertion tenant-isolation suite run as an
+unprivileged (NOBYPASSRLS) database role, 32 loop assertions, and a passing production build.
+
+Not built yet: attachments/evidence upload, email delivery, the incident PDF pack, offline PWA,
+AI, WhatsApp, billing. Those are Sprints 3–5 in [docs/06-BUILD-PLAN.md](docs/06-BUILD-PLAN.md).
 
 Next step: [docs/08-DEPLOYMENT.md §3b](docs/08-DEPLOYMENT.md) — the first-deploy sequence.

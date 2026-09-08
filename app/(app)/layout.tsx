@@ -16,6 +16,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const nav = [
     { href: '/dashboard', label: 'Dashboard', show: hasPermission(ctx.role, 'dashboard.view') },
     { href: '/reports', label: 'Events', show: hasPermission(ctx.role, 'incident.view') },
+    { href: '/investigations', label: 'Investigations', show: hasPermission(ctx.role, 'investigation.view') },
+    { href: '/actions', label: 'Actions', show: hasPermission(ctx.role, 'action.view') },
     { href: '/reports/new', label: 'Report', show: hasPermission(ctx.role, 'incident.create') },
   ].filter((i) => i.show);
 
